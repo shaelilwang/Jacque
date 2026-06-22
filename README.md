@@ -12,6 +12,15 @@ Functionality-first: a plain Flask backend + an unstyled HTML/JS frontend.
 3. Channel3 returns visually-similar products; the backend flattens each into
    `{title, brand, price, image, url}` and the frontend renders them as buy links.
 
+### Text assist (Anthropic Sonnet)
+
+Optionally, click **Fill description (Sonnet)** before searching. The backend
+(`/api/assist`) sends the image to Anthropic Sonnet (`claude-sonnet-4-6`), which
+returns two separate descriptions — the **items** in the image and the sample
+image's **style** — via structured output. These are combined into the search
+query box (editable), then sent to Channel3 alongside the image. Requires
+`ANTHROPIC_API_KEY`.
+
 ## Setup
 
 This project uses a virtual environment (`.venv`).
