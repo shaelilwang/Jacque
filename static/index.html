@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Jacque</title>
+</head>
+<body>
+  <h1>Jacque</h1>
+  <p>Upload an image to find products you can buy.</p>
+
+  <form id="search-form">
+    <p><input type="file" id="image" name="image" accept="image/*" required /></p>
+    <p>
+      <label>Optional text refinement:
+        <input type="text" id="query" name="query" placeholder="e.g. men's, under $100" />
+      </label>
+    </p>
+    <p><button type="submit">Search</button></p>
+  </form>
+
+  <p id="status"></p>
+  <ul id="results"></ul>
+
+  <script>
+    const form = document.getElementById("search-form");
+    const statusEl = document.getElementById("status");
+    const results = document.getElementById("results");
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      results.innerHTML = "";
+      statusEl.textContent = "Searching...";
+
+      const fileInput = document.getElementById("image");
+      const query = document.getElementById("query").value;
+
+      const fd = new FormData();
+      fd.append("image", fileInput.files[0]);
+      if (query) fd.append("query", query);
+
+      let data;
+      try {
+        const resp = await fetch("/api/search", { method: "POST", body: fd });
+        data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Request failed");
+      } catch (err) {
+        statusEl.textContent = "Error: " + err.message;
+        return;
+      }
+
+      const products = data.products || [];
+      if (products.length === 0) {
+        statusEl.textContent = "No products found.";
+        return;
+      }
+
+      statusEl.textContent = products.length + " result(s):";
+      for (const p of products) {
+        const li = document.createElement("li");
+
+        if (p.image) {
+          const img = document.createElement("img");
+          img.src = p.image;
+          img.alt = p.title;
+          img.width = 80;
+          li.appendChild(img);
+          li.appendChild(document.createTextNode(" "));
+        }
+
+        const link = document.createElement("a");
+        link.href = p.url || "#";
+        link.target = "_blank";
+        link.rel = "noopener";
+        link.textContent = p.title || "(untitled)";
+        li.appendChild(link);
+
+        const meta = [];
+        if (p.brand) meta.push(p.brand);
+        if (p.price) meta.push(p.price);
+        if (p.domain) meta.push(p.domain);
+        if (meta.length) {
+          li.appendChild(document.createTextNode(" — " + meta.join(" · ")));
+        }
+
+        results.appendChild(li);
+      }
+    });
+  </script>
+</body>
+</html>
