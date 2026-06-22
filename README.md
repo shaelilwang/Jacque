@@ -26,7 +26,7 @@ query box (editable), then sent to Channel3 alongside the image. Requires
 This project uses a virtual environment (`.venv`).
 
 ```bash
-# 1. Create the venv and install deps (already done if you scaffolded via Claude)
+# 1. Create the venv and install deps
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
 
