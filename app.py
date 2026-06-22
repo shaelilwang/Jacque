@@ -7,6 +7,7 @@ Channel3 search API, then normalize the response into a flat list of
 """
 
 import base64
+import json
 import os
 
 import requests
@@ -20,12 +21,79 @@ except ImportError:
     pass
 
 CHANNEL3_SEARCH_URL = "https://api.trychannel3.com/v1/search"
+SONNET_MODEL = "claude-sonnet-4-6"
 
 app = Flask(__name__, static_folder="static", static_url_path="")
 
 
 def _api_key():
     return os.environ.get("CHANNEL3_API_KEY")
+
+
+def _llm_assist(image_bytes, media_type):
+    """Ask Anthropic Sonnet to describe the image's items and style separately.
+
+    Returns (items, style). Used to auto-fill the Channel3 search query.
+    """
+    import anthropic
+
+    client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from the environment
+    b64 = base64.standard_b64encode(image_bytes).decode("utf-8")
+
+    response = client.messages.create(
+        model=SONNET_MODEL,
+        max_tokens=1024,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {
+                        "type": "image",
+                        "source": {
+                            "type": "base64",
+                            "media_type": media_type,
+                            "data": b64,
+                        },
+                    },
+                    {
+                        "type": "text",
+                        "text": (
+                            "This image is a sample for a product shopping search. "
+                            "Describe it for that purpose. Return two separate "
+                            "descriptions: (1) the items/products shown in the image, "
+                            "and (2) the overall visual style and aesthetic of the "
+                            "image (colors, materials, vibe)."
+                        ),
+                    },
+                ],
+            }
+        ],
+        output_config={
+            "format": {
+                "type": "json_schema",
+                "schema": {
+                    "type": "object",
+                    "properties": {
+                        "items": {
+                            "type": "string",
+                            "description": "The items or products visible in the image.",
+                        },
+                        "style": {
+                            "type": "string",
+                            "description": "The visual style/aesthetic of the sample image.",
+                        },
+                    },
+                    "required": ["items", "style"],
+                    "additionalProperties": False,
+                },
+            }
+        },
+    )
+
+    # output_config.format guarantees the first text block is valid JSON.
+    text = next((b.text for b in response.content if b.type == "text"), "")
+    data = json.loads(text)
+    return data["items"], data["style"]
 
 
 def _format_price(offer):
@@ -77,6 +145,27 @@ def _normalize(products):
 @app.route("/")
 def index():
     return send_from_directory("static", "index.html")
+
+
+@app.route("/api/assist", methods=["POST"])
+def assist():
+    """Text-assist step: Sonnet describes the image's items + style, which the
+    frontend drops into the query box before searching Channel3."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return jsonify({"error": "ANTHROPIC_API_KEY is not set on the server."}), 500
+
+    file = request.files.get("image")
+    if file is None or file.filename == "":
+        return jsonify({"error": "No image uploaded."}), 400
+
+    media_type = file.mimetype or "image/jpeg"
+    try:
+        items, style = _llm_assist(file.read(), media_type)
+    except Exception as e:
+        return jsonify({"error": f"LLM assist failed: {e}"}), 502
+
+    query = f"{items} Style: {style}"
+    return jsonify({"items": items, "style": style, "query": query})
 
 
 @app.route("/api/search", methods=["POST"])

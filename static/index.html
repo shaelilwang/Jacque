@@ -12,8 +12,14 @@
   <form id="search-form">
     <p><input type="file" id="image" name="image" accept="image/*" required /></p>
     <p>
-      <label>Optional text refinement:
-        <input type="text" id="query" name="query" placeholder="e.g. men's, under $100" />
+      <button type="button" id="assist-btn">Fill description (Sonnet)</button>
+      <span id="assist-status"></span>
+    </p>
+    <div id="assist-detail"></div>
+    <p>
+      <label>Query (auto-filled by Sonnet, editable):<br />
+        <textarea id="query" name="query" rows="4" cols="60"
+          placeholder="Describe items + style, or click 'Fill description'"></textarea>
       </label>
     </p>
     <p><button type="submit">Search</button></p>
@@ -26,6 +32,39 @@
     const form = document.getElementById("search-form");
     const statusEl = document.getElementById("status");
     const results = document.getElementById("results");
+    const assistBtn = document.getElementById("assist-btn");
+    const assistStatus = document.getElementById("assist-status");
+    const assistDetail = document.getElementById("assist-detail");
+
+    // Text-assist step: send the image to Sonnet, fill the query box.
+    assistBtn.addEventListener("click", async () => {
+      const fileInput = document.getElementById("image");
+      if (!fileInput.files[0]) {
+        assistStatus.textContent = "Pick an image first.";
+        return;
+      }
+      assistStatus.textContent = "Asking Sonnet...";
+      assistDetail.textContent = "";
+
+      const fd = new FormData();
+      fd.append("image", fileInput.files[0]);
+
+      let data;
+      try {
+        const resp = await fetch("/api/assist", { method: "POST", body: fd });
+        data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Request failed");
+      } catch (err) {
+        assistStatus.textContent = "Error: " + err.message;
+        return;
+      }
+
+      document.getElementById("query").value = data.query;
+      assistStatus.textContent = "Filled.";
+      assistDetail.innerHTML =
+        "<p><b>Items:</b> " + (data.items || "") + "</p>" +
+        "<p><b>Style:</b> " + (data.style || "") + "</p>";
+    });
 
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
