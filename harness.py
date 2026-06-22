@@ -17,9 +17,13 @@ import anthropic
 
 import cost as cost_mod
 
-# web_search_20260209 (dynamic filtering) needs Opus 4.8/4.7/4.6 or Sonnet 4.6.
-SEARCH_MODEL = "claude-opus-4-8"
-WEB_SEARCH_TOOL_TYPE = "web_search_20260209"
+# Cheapest model that supports the web_search server tool. Haiku does NOT support
+# the _20260209 dynamic-filtering variant, so we use the basic web_search_20250305.
+SEARCH_MODEL = "claude-haiku-4-5"
+WEB_SEARCH_TOOL_TYPE = "web_search_20250305"
+# Keep this low: each web search adds an internal server round whose accumulated
+# context is re-billed as input tokens. Fewer searches = lower cost. Tunable.
+MAX_SEARCHES = 3
 DEFAULT_SITES_FILE = os.path.join(os.path.dirname(__file__), "sites.txt")
 
 
@@ -75,7 +79,7 @@ def search_sites(query, sites, max_results=10):
             "type": WEB_SEARCH_TOOL_TYPE,
             "name": "web_search",
             "allowed_domains": sites,
-            "max_uses": 5,
+            "max_uses": MAX_SEARCHES,
         }
     ]
 
@@ -96,26 +100,20 @@ def search_sites(query, sites, max_results=10):
         "leave price as an empty string if unknown. If nothing matches, output []."
     )
 
-    messages = [{"role": "user", "content": user}]
-
-    # Server-side web_search runs in a loop; it may return stop_reason
-    # "pause_turn" if it hits the iteration limit — re-send to resume.
-    # Accumulate token + web-search usage across every call for cost tracking.
+    # Single call — deliberately NO pause_turn resend loop. Re-sending the
+    # transcript would re-bill every accumulated web_search result block (that
+    # was the dominant cost). With max_uses kept small, the server finishes
+    # within its iteration budget in one shot, so pause_turn shouldn't fire; if
+    # it does, we take whatever was produced rather than resending.
     usage = cost_mod.empty_usage()
-    response = None
-    for _ in range(6):
-        response = client.messages.create(
-            model=SEARCH_MODEL,
-            max_tokens=4096,
-            system=system,
-            tools=tools,
-            messages=messages,
-        )
-        cost_mod.add_response_usage(usage, response)
-        if response.stop_reason == "pause_turn":
-            messages.append({"role": "assistant", "content": response.content})
-            continue
-        break
+    response = client.messages.create(
+        model=SEARCH_MODEL,
+        max_tokens=2048,
+        system=system,
+        tools=tools,
+        messages=[{"role": "user", "content": user}],
+    )
+    cost_mod.add_response_usage(usage, response)
 
     text = "".join(b.text for b in response.content if b.type == "text")
     return _extract_products(text), cost_mod.summarize(SEARCH_MODEL, usage)

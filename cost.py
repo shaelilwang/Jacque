@@ -10,6 +10,7 @@ per-call price is an estimate — adjust WEB_SEARCH_USD_PER_CALL to your contrac
 TOKEN_PRICES = {
     "claude-opus-4-8": {"input": 5.0, "output": 25.0},
     "claude-sonnet-4-6": {"input": 3.0, "output": 15.0},
+    "claude-haiku-4-5": {"input": 1.0, "output": 5.0},
 }
 
 # Anthropic web search is billed separately from tokens. Estimate ~$10/1000.

@@ -27,6 +27,10 @@ Instead of Channel3, the harness searches **only a list of websites you supply**
 It drives Claude with the server-side `web_search` tool restricted via
 `allowed_domains` to your sites, and returns buyable product links from them.
 
+Tuned for cost: it uses the cheapest web-search-capable model (Haiku 4.5,
+basic `web_search_20250305`), a single API call (no `pause_turn` re-send of
+accumulated results), and a small `MAX_SEARCHES` cap.
+
 Pipeline is otherwise unchanged: image → Sonnet describes items+style → query →
 **scoped search**.
 
