@@ -1,37 +1,37 @@
-"""Scoped-site search harness — an alternative to Channel3.
+"""Scoped-site search harness — Google Programmable Search edition.
 
-Instead of querying Channel3, this drives Claude with the server-side web_search
-tool, restricted via `allowed_domains` to a list of websites YOU supply
-(`sites.txt`). The model searches only those sites and returns real, currently
-listed products to buy.
+Instead of Channel3 (or Anthropic web_search), this searches ONLY a list of
+websites you supply (`sites.txt`) using the Google Custom Search JSON API,
+scoped via `site:` operators and paginated via the `start` param. Retrieval is
+pure HTTP — no LLM tokens — so it's cheap and supports real pagination.
 
-Pipeline unchanged elsewhere: image -> Sonnet describes items+style -> query.
-This module consumes that query and returns product links from the scoped sites.
+Pipeline elsewhere is unchanged: image -> Sonnet describes items+style -> query.
+This module consumes that query text and returns product links from the sites.
+
+Setup (you supply):
+  - Create a Programmable Search Engine set to "Search the entire web", get its
+    Search engine ID (cx)  -> GOOGLE_CSE_ID
+  - Create an API key for the Custom Search API           -> GOOGLE_API_KEY
 """
 
-import json
 import os
 import re
 
-import anthropic
+import requests
 
 import cost as cost_mod
 
-# Cheapest model that supports the web_search server tool. Haiku does NOT support
-# the _20260209 dynamic-filtering variant, so we use the basic web_search_20250305.
-SEARCH_MODEL = "claude-haiku-4-5"
-WEB_SEARCH_TOOL_TYPE = "web_search_20250305"
-# Keep this low: each web search adds an internal server round whose accumulated
-# context is re-billed as input tokens. Fewer searches = lower cost. Tunable.
-MAX_SEARCHES = 3
+GOOGLE_ENDPOINT = "https://www.googleapis.com/customsearch/v1"
 DEFAULT_SITES_FILE = os.path.join(os.path.dirname(__file__), "sites.txt")
+# Google returns up to 10 results per request; paginate with `start`. Each page
+# is one billed query, so keep this small. 2 pages = up to 20 results.
+MAX_PAGES = 2
 
 
 def load_sites(path=DEFAULT_SITES_FILE):
     """Read the scoped website list. One domain per line; '#' comments allowed.
 
-    URLs are normalized to bare domains (drop scheme + path), which is the form
-    web_search's allowed_domains expects.
+    URLs are normalized to bare domains (drop scheme + path).
     """
     if not os.path.exists(path):
         raise FileNotFoundError(
@@ -43,77 +43,87 @@ def load_sites(path=DEFAULT_SITES_FILE):
             line = line.strip()
             if not line or line.startswith("#"):
                 continue
-            domain = re.sub(r"^https?://", "", line).strip("/")
-            domain = domain.split("/")[0]  # drop any path
+            domain = re.sub(r"^https?://", "", line).strip("/").split("/")[0]
             if domain:
                 sites.append(domain)
     return sites
 
 
-def _extract_products(text):
-    """Pull the JSON array of products out of the model's final message."""
-    match = re.search(r"\[.*\]", text, re.S)
-    if not match:
-        return []
-    try:
-        data = json.loads(match.group(0))
-    except json.JSONDecodeError:
-        return []
-    return data if isinstance(data, list) else []
+def _extract_price(item):
+    """Best-effort price from a Google CSE result's pagemap (often absent)."""
+    pm = item.get("pagemap", {}) or {}
+    for key in ("offer", "product"):
+        entries = pm.get(key) or []
+        if entries:
+            o = entries[0]
+            amt = o.get("price") or o.get("amount")
+            cur = o.get("pricecurrency") or o.get("currency") or ""
+            if amt:
+                return f"{cur} {amt}".strip()
+    metas = pm.get("metatags") or []
+    if metas:
+        m = metas[0]
+        amt = m.get("og:price:amount") or m.get("product:price:amount")
+        cur = m.get("og:price:currency") or m.get("product:price:currency") or ""
+        if amt:
+            return f"{cur} {amt}".strip()
+    return ""
+
+
+def google_search(query, sites, max_results=10, max_pages=MAX_PAGES):
+    """Query the Google Custom Search JSON API, scoped to `sites`, with paging.
+
+    Returns (products, requests_made). Each element is {title, url, price, site}.
+    """
+    key = os.environ.get("GOOGLE_API_KEY")
+    cx = os.environ.get("GOOGLE_CSE_ID")
+    if not key or not cx:
+        raise RuntimeError("GOOGLE_API_KEY and GOOGLE_CSE_ID must be set.")
+    if not sites:
+        raise ValueError("No sites configured — add domains to sites.txt.")
+
+    # Scope to the supplied sites with `site:` operators (PSE must be set to
+    # "Search the entire web" for these to apply).
+    site_clause = " OR ".join(f"site:{d}" for d in sites)
+    q = f"{query} ({site_clause})"
+
+    products = []
+    requests_made = 0
+    start = 1
+    while len(products) < max_results and requests_made < max_pages:
+        num = min(10, max_results - len(products))
+        resp = requests.get(
+            GOOGLE_ENDPOINT,
+            params={"key": key, "cx": cx, "q": q, "num": num, "start": start},
+            timeout=20,
+        )
+        requests_made += 1
+        if resp.status_code != 200:
+            raise RuntimeError(
+                f"Google CSE returned {resp.status_code}: {resp.text[:300]}"
+            )
+        data = resp.json()
+        for it in data.get("items", []):
+            products.append(
+                {
+                    "title": it.get("title", ""),
+                    "url": it.get("link", ""),
+                    "site": it.get("displayLink", ""),
+                    "price": _extract_price(it),
+                }
+            )
+        next_page = (data.get("queries", {}) or {}).get("nextPage")
+        if not next_page:
+            break
+        start = next_page[0].get("startIndex", start + num)
+
+    return products[:max_results], requests_made
 
 
 def search_sites(query, sites, max_results=10):
     """Search the scoped sites for products matching `query`.
 
-    Returns (products, cost) where products is a list of
-    {title, url, price, site} and cost is a cost-summary dict. Raises if
-    ANTHROPIC_API_KEY is unset or no sites are configured.
+    Returns (products, cost). Raises if the Google keys or sites are missing.
     """
-    if not sites:
-        raise ValueError("No sites configured — add domains to sites.txt.")
-
-    client = anthropic.Anthropic()  # reads ANTHROPIC_API_KEY from the environment
-
-    tools = [
-        {
-            "type": WEB_SEARCH_TOOL_TYPE,
-            "name": "web_search",
-            "allowed_domains": sites,
-            "max_uses": MAX_SEARCHES,
-        }
-    ]
-
-    sites_list = ", ".join(sites)
-    system = (
-        "You are a shopping assistant. Use web_search to find real, currently "
-        "listed products the user can buy. Search ONLY the scoped sites listed "
-        "in the user's message; never invent products or URLs. Do not ask the "
-        "user which sites to use — they are given."
-    )
-    user = (
-        f"Scoped sites (search ONLY these): {sites_list}.\n\n"
-        f"Find up to {max_results} products matching this description, only from "
-        f"the scoped sites above.\n\nDescription:\n{query}\n\n"
-        "When done, output ONLY a JSON array (no prose) where each element is "
-        '{"title": str, "url": str, "price": str, "site": str}. '
-        "Each url must be a direct product page on one of the scoped sites; "
-        "leave price as an empty string if unknown. If nothing matches, output []."
-    )
-
-    # Single call — deliberately NO pause_turn resend loop. Re-sending the
-    # transcript would re-bill every accumulated web_search result block (that
-    # was the dominant cost). With max_uses kept small, the server finishes
-    # within its iteration budget in one shot, so pause_turn shouldn't fire; if
-    # it does, we take whatever was produced rather than resending.
-    usage = cost_mod.empty_usage()
-    response = client.messages.create(
-        model=SEARCH_MODEL,
-        max_tokens=2048,
-        system=system,
-        tools=tools,
-        messages=[{"role": "user", "content": user}],
-    )
-    cost_mod.add_response_usage(usage, response)
-
-    text = "".join(b.text for b in response.content if b.type == "text")
-    return _extract_products(text), cost_mod.summarize(SEARCH_MODEL, usage)
+    products, requests_made = google_search(query, sites, max_results)
+    return products, cost_mod.google_summary(requests_made)

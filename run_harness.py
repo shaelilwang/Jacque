@@ -43,8 +43,9 @@ def main():
 
     print(
         f"\nCost: ${cost['cost_usd']:.5f}  "
-        f"(in {cost['input_tokens']}, out {cost['output_tokens']}, "
-        f"{cost['web_searches']} web search(es), model {cost['model']})"
+        f"({cost['web_searches']} search request(s), "
+        f"{cost['input_tokens']} in / {cost['output_tokens']} out tokens, "
+        f"backend {cost['model']})"
     )
 
 

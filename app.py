@@ -176,10 +176,12 @@ def assist():
 
 @app.route("/api/search_scoped", methods=["POST"])
 def search_scoped():
-    """Harness backend: search YOUR scoped sites (sites.txt) via Claude's
-    web_search tool instead of Channel3. Consumes the query text."""
-    if not os.environ.get("ANTHROPIC_API_KEY"):
-        return jsonify({"error": "ANTHROPIC_API_KEY is not set on the server."}), 500
+    """Harness backend: search YOUR scoped sites (sites.txt) via the Google
+    Custom Search API instead of Channel3. Consumes the query text."""
+    if not (os.environ.get("GOOGLE_API_KEY") and os.environ.get("GOOGLE_CSE_ID")):
+        return jsonify(
+            {"error": "GOOGLE_API_KEY and GOOGLE_CSE_ID must be set on the server."}
+        ), 500
 
     query = (request.form.get("query") or "").strip()
     if not query:
@@ -197,7 +199,7 @@ def search_scoped():
     except Exception as e:
         return jsonify({"error": f"Scoped search failed: {e}"}), 502
 
-    cost["backend"] = "scoped (web_search)"
+    cost["backend"] = "scoped (google)"
     # Reshape to the frontend's product shape {title,brand,price,domain,image,url}.
     norm = [
         {

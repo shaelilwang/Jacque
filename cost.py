@@ -16,6 +16,9 @@ TOKEN_PRICES = {
 # Anthropic web search is billed separately from tokens. Estimate ~$10/1000.
 WEB_SEARCH_USD_PER_CALL = 0.01
 
+# Google Custom Search JSON API: 100 queries/day free, then ~$5/1000 (cap 10k/day).
+GOOGLE_SEARCH_USD_PER_QUERY = 0.005
+
 
 def _rate(model, kind):
     return TOKEN_PRICES.get(model, {}).get(kind, 0.0)
@@ -53,6 +56,21 @@ def add_response_usage(acc, response):
         and getattr(b, "name", "") == "web_search"
     )
     return acc
+
+
+def google_summary(num_queries):
+    """Cost summary for the Google Custom Search backend (no tokens)."""
+    total = num_queries * GOOGLE_SEARCH_USD_PER_QUERY
+    return {
+        "model": "google-cse",
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "cache_read_input_tokens": 0,
+        "cache_creation_input_tokens": 0,
+        "web_searches": num_queries,  # Google API requests
+        "cost_usd": round(total, 6),
+        "breakdown_usd": {"google_queries": round(total, 6)},
+    }
 
 
 def summarize(model, usage):
