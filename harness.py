@@ -15,6 +15,8 @@ import re
 
 import anthropic
 
+import cost as cost_mod
+
 # web_search_20260209 (dynamic filtering) needs Opus 4.8/4.7/4.6 or Sonnet 4.6.
 SEARCH_MODEL = "claude-opus-4-8"
 WEB_SEARCH_TOOL_TYPE = "web_search_20260209"
@@ -59,8 +61,9 @@ def _extract_products(text):
 def search_sites(query, sites, max_results=10):
     """Search the scoped sites for products matching `query`.
 
-    Returns a list of {title, url, price, site}. Raises if ANTHROPIC_API_KEY is
-    unset (anthropic.Anthropic() will fail) or no sites are configured.
+    Returns (products, cost) where products is a list of
+    {title, url, price, site} and cost is a cost-summary dict. Raises if
+    ANTHROPIC_API_KEY is unset or no sites are configured.
     """
     if not sites:
         raise ValueError("No sites configured — add domains to sites.txt.")
@@ -97,6 +100,8 @@ def search_sites(query, sites, max_results=10):
 
     # Server-side web_search runs in a loop; it may return stop_reason
     # "pause_turn" if it hits the iteration limit — re-send to resume.
+    # Accumulate token + web-search usage across every call for cost tracking.
+    usage = cost_mod.empty_usage()
     response = None
     for _ in range(6):
         response = client.messages.create(
@@ -106,10 +111,11 @@ def search_sites(query, sites, max_results=10):
             tools=tools,
             messages=messages,
         )
+        cost_mod.add_response_usage(usage, response)
         if response.stop_reason == "pause_turn":
             messages.append({"role": "assistant", "content": response.content})
             continue
         break
 
     text = "".join(b.text for b in response.content if b.type == "text")
-    return _extract_products(text)
+    return _extract_products(text), cost_mod.summarize(SEARCH_MODEL, usage)

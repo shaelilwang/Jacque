@@ -28,11 +28,10 @@ def main():
     print(f"Scoped to {len(sites)} site(s): {', '.join(sites)}")
     print(f"Query: {query}\n")
 
-    products = search_sites(query, sites)
+    products, cost = search_sites(query, sites)
+
     if not products:
         print("No products found.")
-        return
-
     for i, p in enumerate(products, 1):
         title = p.get("title", "(untitled)")
         price = p.get("price", "")
@@ -41,6 +40,12 @@ def main():
         meta = " — ".join(x for x in (site, price) if x)
         print(f"{i}. {title}" + (f"  [{meta}]" if meta else ""))
         print(f"   {url}")
+
+    print(
+        f"\nCost: ${cost['cost_usd']:.5f}  "
+        f"(in {cost['input_tokens']}, out {cost['output_tokens']}, "
+        f"{cost['web_searches']} web search(es), model {cost['model']})"
+    )
 
 
 if __name__ == "__main__":

@@ -28,8 +28,16 @@
         Search my scoped sites (sites.txt) instead of Channel3
       </label>
     </p>
+    <p>
+      <label>
+        <input type="checkbox" id="cost-toggle" />
+        Track cost (compare spend before/after backend changes)
+      </label>
+    </p>
     <p><button type="submit">Search</button></p>
   </form>
+
+  <div id="cost-panel" style="display:none"></div>
 
   <p id="status"></p>
   <ul id="results"></ul>
@@ -41,6 +49,58 @@
     const assistBtn = document.getElementById("assist-btn");
     const assistStatus = document.getElementById("assist-status");
     const assistDetail = document.getElementById("assist-detail");
+    const costToggle = document.getElementById("cost-toggle");
+    const costPanel = document.getElementById("cost-panel");
+
+    // Cost tracking — accumulate across assist + search calls so you can
+    // compare total pipeline spend before vs. after swapping the backend.
+    let costTotal = 0;
+    let costCount = 0;
+    const costLog = [];
+
+    function recordCost(cost) {
+      if (!cost) return;
+      if (cost.cost_usd != null) {
+        costTotal += cost.cost_usd;
+        costCount += 1;
+      }
+      costLog.unshift(cost);
+      renderCost();
+    }
+
+    function renderCost() {
+      const avg = costCount ? costTotal / costCount : 0;
+      let html = "<b>Cost tracking</b><br/>";
+      html +=
+        "Session: $" + costTotal.toFixed(5) + " over " + costCount +
+        " billed call(s) (avg $" + avg.toFixed(5) + ")<br/>";
+      html += "<button type='button' id='cost-reset'>Reset</button><ul>";
+      for (const c of costLog.slice(0, 12)) {
+        if (c.cost_usd == null) {
+          html += "<li>" + c.backend + ": " + (c.note || "not tracked") + "</li>";
+        } else {
+          let line =
+            c.backend + " [" + c.model + "] — $" + c.cost_usd.toFixed(5) +
+            " (in " + c.input_tokens + ", out " + c.output_tokens;
+          if (c.web_searches) line += ", " + c.web_searches + " web search(es)";
+          line += ")";
+          html += "<li>" + line + "</li>";
+        }
+      }
+      html += "</ul>";
+      costPanel.innerHTML = html;
+      document.getElementById("cost-reset").addEventListener("click", () => {
+        costTotal = 0;
+        costCount = 0;
+        costLog.length = 0;
+        renderCost();
+      });
+    }
+
+    costToggle.addEventListener("change", () => {
+      costPanel.style.display = costToggle.checked ? "block" : "none";
+    });
+    renderCost();
 
     // Text-assist step: send the image to Sonnet, fill the query box.
     assistBtn.addEventListener("click", async () => {
@@ -70,6 +130,7 @@
       assistDetail.innerHTML =
         "<p><b>Items:</b> " + (data.items || "") + "</p>" +
         "<p><b>Style:</b> " + (data.style || "") + "</p>";
+      recordCost(data.cost);
     });
 
     form.addEventListener("submit", async (e) => {
@@ -96,6 +157,8 @@
         statusEl.textContent = "Error: " + err.message;
         return;
       }
+
+      recordCost(data.cost);
 
       const products = data.products || [];
       if (products.length === 0) {
