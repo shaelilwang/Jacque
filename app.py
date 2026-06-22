@@ -13,6 +13,8 @@ import os
 import requests
 from flask import Flask, jsonify, request, send_from_directory
 
+import cost as cost_mod
+
 try:
     from dotenv import load_dotenv
 
@@ -90,10 +92,13 @@ def _llm_assist(image_bytes, media_type):
         },
     )
 
+    usage = cost_mod.empty_usage()
+    cost_mod.add_response_usage(usage, response)
+
     # output_config.format guarantees the first text block is valid JSON.
     text = next((b.text for b in response.content if b.type == "text"), "")
     data = json.loads(text)
-    return data["items"], data["style"]
+    return data["items"], data["style"], cost_mod.summarize(SONNET_MODEL, usage)
 
 
 def _format_price(offer):
@@ -160,12 +165,52 @@ def assist():
 
     media_type = file.mimetype or "image/jpeg"
     try:
-        items, style = _llm_assist(file.read(), media_type)
+        items, style, cost = _llm_assist(file.read(), media_type)
     except Exception as e:
         return jsonify({"error": f"LLM assist failed: {e}"}), 502
 
+    cost["backend"] = "assist (sonnet)"
     query = f"{items} Style: {style}"
-    return jsonify({"items": items, "style": style, "query": query})
+    return jsonify({"items": items, "style": style, "query": query, "cost": cost})
+
+
+@app.route("/api/search_scoped", methods=["POST"])
+def search_scoped():
+    """Harness backend: search YOUR scoped sites (sites.txt) via Claude's
+    web_search tool instead of Channel3. Consumes the query text."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return jsonify({"error": "ANTHROPIC_API_KEY is not set on the server."}), 500
+
+    query = (request.form.get("query") or "").strip()
+    if not query:
+        return jsonify(
+            {"error": "No query. Use 'Fill description' or type a description first."}
+        ), 400
+
+    try:
+        from harness import load_sites, search_sites
+
+        sites = load_sites()
+        products, cost = search_sites(query, sites)
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        return jsonify({"error": f"Scoped search failed: {e}"}), 502
+
+    cost["backend"] = "scoped (web_search)"
+    # Reshape to the frontend's product shape {title,brand,price,domain,image,url}.
+    norm = [
+        {
+            "title": p.get("title", ""),
+            "brand": "",
+            "price": p.get("price", ""),
+            "domain": p.get("site", ""),
+            "image": "",
+            "url": p.get("url", ""),
+        }
+        for p in products
+    ]
+    return jsonify({"products": norm, "cost": cost})
 
 
 @app.route("/api/search", methods=["POST"])
@@ -206,7 +251,12 @@ def search():
 
     data = resp.json()
     products = data.get("products", [])
-    return jsonify({"products": _normalize(products)})
+    cost = {
+        "backend": "channel3",
+        "cost_usd": None,
+        "note": "Channel3 request cost not tracked",
+    }
+    return jsonify({"products": _normalize(products), "cost": cost})
 
 
 if __name__ == "__main__":
