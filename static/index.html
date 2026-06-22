@@ -22,6 +22,12 @@
           placeholder="Describe items + style, or click 'Fill description'"></textarea>
       </label>
     </p>
+    <p>
+      <label>
+        <input type="checkbox" id="scoped" checked />
+        Search my scoped sites (sites.txt) instead of Channel3
+      </label>
+    </p>
     <p><button type="submit">Search</button></p>
   </form>
 
@@ -74,13 +80,16 @@
       const fileInput = document.getElementById("image");
       const query = document.getElementById("query").value;
 
+      const scoped = document.getElementById("scoped").checked;
+      const endpoint = scoped ? "/api/search_scoped" : "/api/search";
+
       const fd = new FormData();
-      fd.append("image", fileInput.files[0]);
+      if (fileInput.files[0]) fd.append("image", fileInput.files[0]);
       if (query) fd.append("query", query);
 
       let data;
       try {
-        const resp = await fetch("/api/search", { method: "POST", body: fd });
+        const resp = await fetch(endpoint, { method: "POST", body: fd });
         data = await resp.json();
         if (!resp.ok) throw new Error(data.error || "Request failed");
       } catch (err) {

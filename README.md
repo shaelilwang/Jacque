@@ -21,6 +21,35 @@ image's **style** — via structured output. These are combined into the search
 query box (editable), then sent to Channel3 alongside the image. Requires
 `ANTHROPIC_API_KEY`.
 
+## Harness: scoped-site search (alternative to Channel3)
+
+Instead of Channel3, the harness searches **only a list of websites you supply**.
+It drives Claude with the server-side `web_search` tool restricted via
+`allowed_domains` to your sites, and returns buyable product links from them.
+
+Pipeline is otherwise unchanged: image → Sonnet describes items+style → query →
+**scoped search**.
+
+```bash
+# 1. Supply your sites (one per line; gitignored)
+cp sites.example.txt sites.txt
+# edit sites.txt and add your domains, e.g.
+#   www.uniqlo.com
+#   www.everlane.com
+
+# 2. Run it from the CLI
+.venv/bin/python run_harness.py "minimalist white leather sneakers, clean modern aesthetic"
+
+# ...or in the web UI: the "Search my scoped sites" checkbox (on by default on
+# this branch) routes Search to /api/search_scoped instead of Channel3.
+```
+
+Requires `ANTHROPIC_API_KEY`. Channel3 is not needed for scoped search.
+
+- `harness.py` — core: `load_sites()` + `search_sites(query, sites)`.
+- `run_harness.py` — CLI runner.
+- `/api/search_scoped` — Flask endpoint used by the frontend toggle.
+
 ## Setup
 
 This project uses a virtual environment (`.venv`).

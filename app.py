@@ -168,6 +168,44 @@ def assist():
     return jsonify({"items": items, "style": style, "query": query})
 
 
+@app.route("/api/search_scoped", methods=["POST"])
+def search_scoped():
+    """Harness backend: search YOUR scoped sites (sites.txt) via Claude's
+    web_search tool instead of Channel3. Consumes the query text."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return jsonify({"error": "ANTHROPIC_API_KEY is not set on the server."}), 500
+
+    query = (request.form.get("query") or "").strip()
+    if not query:
+        return jsonify(
+            {"error": "No query. Use 'Fill description' or type a description first."}
+        ), 400
+
+    try:
+        from harness import load_sites, search_sites
+
+        sites = load_sites()
+        products = search_sites(query, sites)
+    except FileNotFoundError as e:
+        return jsonify({"error": str(e)}), 500
+    except Exception as e:
+        return jsonify({"error": f"Scoped search failed: {e}"}), 502
+
+    # Reshape to the frontend's product shape {title,brand,price,domain,image,url}.
+    norm = [
+        {
+            "title": p.get("title", ""),
+            "brand": "",
+            "price": p.get("price", ""),
+            "domain": p.get("site", ""),
+            "image": "",
+            "url": p.get("url", ""),
+        }
+        for p in products
+    ]
+    return jsonify({"products": norm})
+
+
 @app.route("/api/search", methods=["POST"])
 def search():
     api_key = _api_key()

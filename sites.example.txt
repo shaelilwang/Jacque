@@ -1,0 +1,9 @@
+# Scoped website list for the search harness.
+# Copy this file to sites.txt and replace the examples with YOUR sites.
+# One site per line. Bare domains or full URLs both work (paths are dropped).
+# Lines starting with '#' are ignored.
+
+# examples — replace these:
+# www.uniqlo.com
+# www.everlane.com
+# www.patagonia.com
