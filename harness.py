@@ -28,11 +28,12 @@ import cost as cost_mod
 SERPER_ENDPOINT = "https://google.serper.dev/search"
 DEFAULT_SITES_FILE = os.path.join(os.path.dirname(__file__), "sites.txt")
 # Serper returns up to ~10 organic results per page; paginate with `page`. Each
-# page is one billed query. The product filter thins each page, so fetch a few
-# pages to keep enough buyable results flowing through. 4 pages = up to 40 raw.
+# page is one billed query. The product filter thins each page, so fetch several
+# pages to keep enough buyable results flowing through for downstream ranking.
+# 8 pages = up to 80 raw candidates (~8 Serper credits/search).
 # (An `inurl:product` query bias was tried but returns nothing when combined
 # with the grouped `site:` OR clause, so we filter post-hoc instead.)
-MAX_PAGES = 4
+MAX_PAGES = 8
 # Serper's free tier rate-limits rapid bursts, so pace pages slightly and retry
 # transient 403/429s with backoff before giving up.
 SERPER_PAGE_DELAY = 0.4
@@ -235,7 +236,7 @@ def _serper_post(key, q, page, num=10):
     return resp
 
 
-def serper_search(query, sites, max_results=10, max_pages=MAX_PAGES,
+def serper_search(query, sites, max_results=30, max_pages=MAX_PAGES,
                   products_only=True):
     """Query Serper.dev's Google Search API, scoped to `sites`, with paging.
 
@@ -291,6 +292,7 @@ def serper_search(query, sites, max_results=10, max_pages=MAX_PAGES,
                     "url": link,
                     "site": domain,
                     "price": _extract_price(it),
+                    "snippet": it.get("snippet", ""),
                 }
             )
         if len(organic) < 10:
@@ -300,7 +302,7 @@ def serper_search(query, sites, max_results=10, max_pages=MAX_PAGES,
     return products[:max_results], requests_made
 
 
-def search_sites(query, sites, max_results=10, with_images=True):
+def search_sites(query, sites, max_results=30, with_images=True):
     """Search the scoped sites for products matching `query`.
 
     Returns (products, cost). Raises if the Serper key or sites are missing.

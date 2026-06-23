@@ -63,6 +63,42 @@ Requires `SERPER_API_KEY` (the Sonnet assist step still uses
 - `run_harness.py` — CLI runner.
 - `/api/search_scoped` — Flask endpoint used by the frontend toggle.
 
+## Ranking: score & rank candidates for the user
+
+Turns retrieved candidates into a ranked list scored against a user profile
+(measurements, usual size, fit preference, monthly budget, hardcoded taste spec,
+Kibbe body type) and the actual garment.
+
+Two stages, cleanly separated:
+1. **Extraction (cheap LLM, Haiku)** — `extract.py` reads each candidate's text
+   and pulls garment type, silhouette/aesthetic tags, material/colour, any stated
+   dimensions, and whether it *is* the target item — each with a confidence.
+   Missing data stays `None` (never guessed).
+2. **Scoring (deterministic, pure)** — `ranker.py` computes four sub-scores —
+   **target match, fit (Kibbe silhouette + dimensional), taste, budget** — and a
+   confidence-weighted overall. Pure functions, no I/O, unit-tested.
+
+```bash
+.venv/bin/python run_ranker.py "minimalist white leather sneakers"   # demo
+.venv/bin/python test_ranker.py                                       # unit tests
+```
+
+- **Tune weights** via `RankingWeights` in `ranker.py` (`DEFAULT_WEIGHTS`):
+  `target_match`, `fit`, `taste`, `budget`, plus `confidence_power` (how hard low
+  confidence pulls a sub-score's effective weight down).
+- **Edit the profile** in `profiles.py` (`DEFAULT_PROFILE`); the taste spec is
+  hardcoded, the rest are example placeholders to replace.
+- Each sub-score's effective weight is `base * confidence**power`, so uncertain
+  signals shrink automatically and `None` drops out — missing data is honest end
+  to end, and items with no usable signal sort last (`overall = None`).
+
+Requires `ANTHROPIC_API_KEY` (extraction) on top of `SERPER_API_KEY` (search).
+
+- `profiles.py` — user profile model (`UserProfile`, `Measurements`, `KibbeType`).
+- `ranker.py` — `Garment` model + pure scorers + `rank()`.
+- `extract.py` — Haiku extraction + `rank_candidates()` orchestrator.
+- `test_ranker.py` — unit tests for the deterministic scoring.
+
 ## Setup
 
 This project uses a virtual environment (`.venv`).
