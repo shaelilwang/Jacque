@@ -239,6 +239,35 @@
     document.getElementById("rank").addEventListener("change", (e) => {
       if (e.target.checked) document.getElementById("profile-details").open = true;
     });
+
+    // Persist the profile in this browser only (localStorage — never sent to git
+    // or anywhere but the ranking request you trigger).
+    const PROFILE_KEY = "jacque_profile_v1";
+    const profileFieldIds = ["height_cm", "bust_cm", "waist_cm", "hip_cm",
+      "inseam_cm", "usual_size", "monthly_budget_usd", "fit_preference", "kibbe"];
+
+    function loadProfile() {
+      let saved = {};
+      try { saved = JSON.parse(localStorage.getItem(PROFILE_KEY) || "{}"); } catch (e) {}
+      for (const id of profileFieldIds) {
+        const el = document.getElementById(id);
+        if (el && saved[id] != null && saved[id] !== "") el.value = saved[id];
+      }
+    }
+    function saveProfile() {
+      const data = {};
+      for (const id of profileFieldIds) {
+        const el = document.getElementById(id);
+        if (el) data[id] = el.value;
+      }
+      try { localStorage.setItem(PROFILE_KEY, JSON.stringify(data)); } catch (e) {}
+    }
+    loadProfile();
+    for (const id of profileFieldIds) {
+      const el = document.getElementById(id);
+      if (el) el.addEventListener("change", saveProfile);
+    }
+
     renderCost();
 
     // Text-assist step: send the image to Sonnet, fill the query box.
@@ -301,10 +330,9 @@
       if (query) fd.append("query", query);
       if (wantRank) {
         fd.append("rank", "1");
+        saveProfile(); // remember this browser's profile for next time
         // Forward the profile fields; blanks are simply omitted.
-        const profileFields = ["height_cm", "bust_cm", "waist_cm", "hip_cm",
-          "inseam_cm", "usual_size", "monthly_budget_usd", "fit_preference", "kibbe"];
-        for (const id of profileFields) {
+        for (const id of profileFieldIds) {
           const v = document.getElementById(id).value.trim();
           if (v) fd.append(id, v);
         }
