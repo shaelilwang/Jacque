@@ -189,11 +189,15 @@ def search_scoped():
             {"error": "No query. Use 'Fill description' or type a description first."}
         ), 400
 
+    gender = (request.form.get("gender") or "").strip().lower()
+    if gender not in ("women", "men"):
+        gender = None
+
     try:
         from harness import load_sites, search_sites
 
         sites = load_sites()
-        products, cost = search_sites(query, sites)
+        products, cost = search_sites(query, sites, gender=gender)
     except FileNotFoundError as e:
         return jsonify({"error": str(e)}), 500
     except Exception as e:

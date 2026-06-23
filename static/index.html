@@ -109,6 +109,15 @@
       </label>
     </p>
     <p>
+      <label>Shopping for:
+        <select id="gender">
+          <option value="">Any</option>
+          <option value="women">Women's</option>
+          <option value="men">Men's</option>
+        </select>
+      </label>
+    </p>
+    <p>
       <label>
         <input type="checkbox" id="scoped" checked />
         Search my scoped sites (sites.txt) instead of Channel3
@@ -245,25 +254,27 @@
     const PROFILE_KEY = "jacque_profile_v1";
     const profileFieldIds = ["height_cm", "bust_cm", "waist_cm", "hip_cm",
       "inseam_cm", "usual_size", "monthly_budget_usd", "fit_preference", "kibbe"];
+    // Persist the gender preference too (sent on every scoped search, not just ranking).
+    const persistIds = profileFieldIds.concat(["gender"]);
 
     function loadProfile() {
       let saved = {};
       try { saved = JSON.parse(localStorage.getItem(PROFILE_KEY) || "{}"); } catch (e) {}
-      for (const id of profileFieldIds) {
+      for (const id of persistIds) {
         const el = document.getElementById(id);
         if (el && saved[id] != null && saved[id] !== "") el.value = saved[id];
       }
     }
     function saveProfile() {
       const data = {};
-      for (const id of profileFieldIds) {
+      for (const id of persistIds) {
         const el = document.getElementById(id);
         if (el) data[id] = el.value;
       }
       try { localStorage.setItem(PROFILE_KEY, JSON.stringify(data)); } catch (e) {}
     }
     loadProfile();
-    for (const id of profileFieldIds) {
+    for (const id of persistIds) {
       const el = document.getElementById(id);
       if (el) el.addEventListener("change", saveProfile);
     }
@@ -328,6 +339,8 @@
       const fd = new FormData();
       if (fileInput.files[0]) fd.append("image", fileInput.files[0]);
       if (query) fd.append("query", query);
+      const gender = document.getElementById("gender").value;
+      if (gender && scoped) fd.append("gender", gender);
       if (wantRank) {
         fd.append("rank", "1");
         saveProfile(); // remember this browser's profile for next time

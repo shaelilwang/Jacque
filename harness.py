@@ -90,6 +90,21 @@ def _is_buyable(url):
     return bool(_PRODUCT_RE.search(path))
 
 
+# Gender detection from URL/title. Check women first — "women" contains "men".
+_WOMEN_RE = re.compile(r"wom[ae]n|ladies|female|girls?", re.I)
+_MEN_RE = re.compile(r"\bmen\b|men['’`]s|\bmens\b|\bman\b|male|boys?", re.I)
+
+
+def _detect_gender(url, title=""):
+    """Best-effort 'women' / 'men' from a result, or None if unclear (e.g. unisex)."""
+    text = f"{url} {title}"
+    if _WOMEN_RE.search(text):
+        return "women"
+    if _MEN_RE.search(text):
+        return "men"
+    return None
+
+
 def _dedup_key(title, url):
     """A product identity key that collapses color/locale/brand variants.
 
@@ -237,11 +252,13 @@ def _serper_post(key, q, page, num=10):
 
 
 def serper_search(query, sites, max_results=30, max_pages=MAX_PAGES,
-                  products_only=True):
+                  products_only=True, gender=None):
     """Query Serper.dev's Google Search API, scoped to `sites`, with paging.
 
     With `products_only` (default), only individual buyable product pages are
     kept — homepages, collection listings, and editorial content are dropped.
+    `gender` ("women"/"men") biases the query and drops opposite-gender results
+    (items of unclear/unisex gender are kept).
 
     Returns (products, requests_made). Each element is {title, url, price, site}.
     """
@@ -251,9 +268,11 @@ def serper_search(query, sites, max_results=30, max_pages=MAX_PAGES,
     if not sites:
         raise ValueError("No sites configured — add domains to sites.txt.")
 
-    # Scope to the supplied sites with `site:` operators.
+    # Scope to the supplied sites with `site:` operators; bias by gender if set.
     site_clause = " OR ".join(f"site:{d}" for d in sites)
-    q = f"{query} ({site_clause})"
+    gender_term = {"women": "women's", "men": "men's"}.get(gender, "")
+    q = f"{gender_term} {query} ({site_clause})".strip() if gender_term else \
+        f"{query} ({site_clause})"
 
     products = []
     seen_keys = set()  # collapse color/locale/brand variants of the same product
@@ -280,6 +299,11 @@ def serper_search(query, sites, max_results=30, max_pages=MAX_PAGES,
             # Keep only individual product pages (drop homepages/listings/editorial).
             if products_only and not _is_buyable(link):
                 continue
+            # Gender filter: drop clearly opposite-gender items (keep unisex/unknown).
+            if gender in ("women", "men"):
+                detected = _detect_gender(link, it.get("title", ""))
+                if detected and detected != gender:
+                    continue
             # Skip color/locale/brand variants of a product we already have.
             dedup_key = _dedup_key(it.get("title", ""), link)
             if dedup_key in seen_keys:
@@ -302,13 +326,14 @@ def serper_search(query, sites, max_results=30, max_pages=MAX_PAGES,
     return products[:max_results], requests_made
 
 
-def search_sites(query, sites, max_results=30, with_images=True):
+def search_sites(query, sites, max_results=30, with_images=True, gender=None):
     """Search the scoped sites for products matching `query`.
 
     Returns (products, cost). Raises if the Serper key or sites are missing.
     When `with_images`, each product is enriched with its og:image URL.
+    `gender` ("women"/"men") filters results to that gender (unisex kept).
     """
-    products, requests_made = serper_search(query, sites, max_results)
+    products, requests_made = serper_search(query, sites, max_results, gender=gender)
     if with_images:
         attach_images(products)
     return products, cost_mod.serper_summary(requests_made)
