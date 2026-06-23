@@ -1,5 +1,5 @@
 """Cost estimation for Jacque, so we can compare spend before/after swapping
-the search backend (Anthropic web_search now -> Google PSE later).
+the search backend (Anthropic web_search vs. Serper.dev scoped search).
 
 All figures are USD estimates. Token prices are list prices per 1M tokens;
 cache reads bill ~0.1x input and cache writes ~1.25x input. The web-search
@@ -16,8 +16,8 @@ TOKEN_PRICES = {
 # Anthropic web search is billed separately from tokens. Estimate ~$10/1000.
 WEB_SEARCH_USD_PER_CALL = 0.01
 
-# Google Custom Search JSON API: 100 queries/day free, then ~$5/1000 (cap 10k/day).
-GOOGLE_SEARCH_USD_PER_QUERY = 0.005
+# Serper.dev: 2,500 free credits, then ~$0.30-$1 per 1,000 queries by plan.
+SERPER_USD_PER_QUERY = 0.001
 
 
 def _rate(model, kind):
@@ -58,18 +58,18 @@ def add_response_usage(acc, response):
     return acc
 
 
-def google_summary(num_queries):
-    """Cost summary for the Google Custom Search backend (no tokens)."""
-    total = num_queries * GOOGLE_SEARCH_USD_PER_QUERY
+def serper_summary(num_queries):
+    """Cost summary for the Serper.dev search backend (no tokens)."""
+    total = num_queries * SERPER_USD_PER_QUERY
     return {
-        "model": "google-cse",
+        "model": "serper",
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_input_tokens": 0,
         "cache_creation_input_tokens": 0,
-        "web_searches": num_queries,  # Google API requests
+        "web_searches": num_queries,  # Serper API requests
         "cost_usd": round(total, 6),
-        "breakdown_usd": {"google_queries": round(total, 6)},
+        "breakdown_usd": {"serper_queries": round(total, 6)},
     }
 
 

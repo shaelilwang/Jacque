@@ -24,18 +24,21 @@ query box (editable), then sent to Channel3 alongside the image. Requires
 ## Harness: scoped-site search (alternative to Channel3)
 
 Instead of Channel3, the harness searches **only a list of websites you supply**
-using the **Google Custom Search JSON API**, scoped via `site:` operators and
-paginated via the `start` param. Retrieval is pure HTTP — no LLM tokens — so it's
+using the **Serper.dev Google Search API**, scoped via `site:` operators and
+paginated via the `page` param. Retrieval is pure HTTP — no LLM tokens — so it's
 cheap and supports real pagination.
+
+> Note: this previously used the Google Custom Search JSON API, but Google closed
+> that API to new customers in Jan 2026 (new projects get a 403 even when it's
+> "enabled"), so the harness now uses Serper.dev.
 
 Pipeline is otherwise unchanged: image → Sonnet describes items+style → query →
 **scoped Google search**.
 
-Setup the Google side once:
-1. Create a [Programmable Search Engine](https://programmablesearchengine.google.com/),
-   set it to **"Search the entire web"**, and copy its **Search engine ID** → `GOOGLE_CSE_ID`.
-2. Enable the **Custom Search API** in Google Cloud and create an **API key** → `GOOGLE_API_KEY`.
-3. Put both in `.env` (see `.env.example`).
+Setup the Serper side once:
+1. Sign up at [serper.dev](https://serper.dev) (2,500 free credits) and copy your
+   API key → `SERPER_API_KEY`.
+2. Put it in `.env` (see `.env.example`).
 
 ```bash
 # 1. Supply your sites (one per line; gitignored)
@@ -51,7 +54,7 @@ cp sites.example.txt sites.txt
 # this branch) routes Search to /api/search_scoped instead of Channel3.
 ```
 
-Requires `GOOGLE_API_KEY` + `GOOGLE_CSE_ID` (the Sonnet assist step still uses
+Requires `SERPER_API_KEY` (the Sonnet assist step still uses
 `ANTHROPIC_API_KEY`). Channel3 is not needed for scoped search.
 
 `MAX_PAGES` in `harness.py` controls pagination depth (10 results/page).

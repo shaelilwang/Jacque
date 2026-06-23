@@ -176,11 +176,11 @@ def assist():
 
 @app.route("/api/search_scoped", methods=["POST"])
 def search_scoped():
-    """Harness backend: search YOUR scoped sites (sites.txt) via the Google
-    Custom Search API instead of Channel3. Consumes the query text."""
-    if not (os.environ.get("GOOGLE_API_KEY") and os.environ.get("GOOGLE_CSE_ID")):
+    """Harness backend: search YOUR scoped sites (sites.txt) via the Serper.dev
+    search API instead of Channel3. Consumes the query text."""
+    if not os.environ.get("SERPER_API_KEY"):
         return jsonify(
-            {"error": "GOOGLE_API_KEY and GOOGLE_CSE_ID must be set on the server."}
+            {"error": "SERPER_API_KEY must be set on the server."}
         ), 500
 
     query = (request.form.get("query") or "").strip()
@@ -199,7 +199,7 @@ def search_scoped():
     except Exception as e:
         return jsonify({"error": f"Scoped search failed: {e}"}), 502
 
-    cost["backend"] = "scoped (google)"
+    cost["backend"] = "scoped (serper)"
     # Reshape to the frontend's product shape {title,brand,price,domain,image,url}.
     norm = [
         {
@@ -207,7 +207,7 @@ def search_scoped():
             "brand": "",
             "price": p.get("price", ""),
             "domain": p.get("site", ""),
-            "image": "",
+            "image": p.get("image", ""),
             "url": p.get("url", ""),
         }
         for p in products

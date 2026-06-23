@@ -5,6 +5,3 @@
 # examples — replace these:
 www.uniqlo.com
 www.everlane.com
-www.cos.com
-www.ssense.com
-www.kookai.us
