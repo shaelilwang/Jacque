@@ -7,6 +7,19 @@
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; margin: 24px; }
 
+    /* Profile inputs (shown when ranking). */
+    #profile-details { margin: 4px 0 8px; max-width: 640px; }
+    #profile-details summary { cursor: pointer; font-weight: 600; }
+    .profile-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+      gap: 10px 14px;
+      margin: 10px 0;
+    }
+    .profile-grid label { display: flex; flex-direction: column; font-size: 13px; gap: 3px; }
+    .profile-grid input, .profile-grid select { padding: 4px 6px; font-size: 14px; }
+    .hint { font-size: 12px; color: #666; margin: 6px 0; }
+
     /* Responsive product grid: cards size themselves, wrap to fit. */
     #results {
       list-style: none;
@@ -107,6 +120,49 @@
         Rank for my profile (taste · fit/Kibbe · budget) — uses Haiku, scoped only
       </label>
     </p>
+    <details id="profile-details">
+      <summary>Your profile (used when ranking)</summary>
+      <div id="profile-form">
+        <p class="hint">Taste spec (fixed for now):
+          <b>sculptural · subversive · androgynous · editorial · neo-romantic</b></p>
+        <div class="profile-grid">
+          <label>Height (cm)<input type="number" id="height_cm" step="0.1" placeholder="e.g. 170" /></label>
+          <label>Bust (cm)<input type="number" id="bust_cm" step="0.1" placeholder="e.g. 86" /></label>
+          <label>Waist (cm)<input type="number" id="waist_cm" step="0.1" placeholder="e.g. 68" /></label>
+          <label>Hip (cm)<input type="number" id="hip_cm" step="0.1" placeholder="e.g. 94" /></label>
+          <label>Inseam (cm)<input type="number" id="inseam_cm" step="0.1" placeholder="optional" /></label>
+          <label>Usual size<input type="text" id="usual_size" placeholder="e.g. US 4 / S" /></label>
+          <label>Monthly budget ($)<input type="number" id="monthly_budget_usd" step="1" placeholder="e.g. 400" /></label>
+          <label>Fit preference
+            <select id="fit_preference">
+              <option value="fitted">fitted</option>
+              <option value="regular">regular</option>
+              <option value="relaxed" selected>relaxed</option>
+              <option value="oversized">oversized</option>
+            </select>
+          </label>
+          <label>Kibbe body type
+            <select id="kibbe">
+              <option value="">— none —</option>
+              <option>Dramatic</option>
+              <option>Soft Dramatic</option>
+              <option>Flamboyant Natural</option>
+              <option>Natural</option>
+              <option>Soft Natural</option>
+              <option>Flamboyant Gamine</option>
+              <option>Gamine</option>
+              <option>Soft Gamine</option>
+              <option>Dramatic Classic</option>
+              <option>Classic</option>
+              <option>Soft Classic</option>
+              <option>Theatrical Romantic</option>
+              <option>Romantic</option>
+            </select>
+          </label>
+        </div>
+        <p class="hint">Blank fields stay unknown — fit/budget just score lower confidence, never guessed.</p>
+      </div>
+    </details>
     <p>
       <label>
         <input type="checkbox" id="cost-toggle" />
@@ -179,6 +235,10 @@
     costToggle.addEventListener("change", () => {
       costPanel.style.display = costToggle.checked ? "block" : "none";
     });
+    // Open the profile section the first time ranking is enabled.
+    document.getElementById("rank").addEventListener("change", (e) => {
+      if (e.target.checked) document.getElementById("profile-details").open = true;
+    });
     renderCost();
 
     // Text-assist step: send the image to Sonnet, fill the query box.
@@ -239,7 +299,16 @@
       const fd = new FormData();
       if (fileInput.files[0]) fd.append("image", fileInput.files[0]);
       if (query) fd.append("query", query);
-      if (wantRank) fd.append("rank", "1");
+      if (wantRank) {
+        fd.append("rank", "1");
+        // Forward the profile fields; blanks are simply omitted.
+        const profileFields = ["height_cm", "bust_cm", "waist_cm", "hip_cm",
+          "inseam_cm", "usual_size", "monthly_budget_usd", "fit_preference", "kibbe"];
+        for (const id of profileFields) {
+          const v = document.getElementById(id).value.trim();
+          if (v) fd.append(id, v);
+        }
+      }
 
       let data;
       try {

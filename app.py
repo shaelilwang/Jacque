@@ -221,7 +221,8 @@ def search_scoped():
         try:
             from extract import rank_candidates
 
-            ranked, rank_cost = rank_candidates(products, target=query)
+            profile = _profile_from_form(request.form)
+            ranked, rank_cost = rank_candidates(products, target=query, profile=profile)
         except Exception as e:
             return jsonify({"error": f"Ranking failed: {e}"}), 502
 
@@ -235,6 +236,57 @@ def search_scoped():
         return jsonify({"products": norm, "cost": cost, "rank_cost": rank_cost})
 
     return jsonify({"products": [_shape(p) for p in products], "cost": cost})
+
+
+def _profile_from_form(form):
+    """Build a UserProfile from submitted form fields. Blanks stay None (honest).
+
+    The taste spec is hardcoded for now; everything else comes from the user.
+    """
+    from profiles import (
+        DEFAULT_TASTE,
+        FitPreference,
+        KibbeType,
+        Measurements,
+        UserProfile,
+    )
+
+    def num(key):
+        raw = (form.get(key) or "").strip()
+        try:
+            return float(raw) if raw else None
+        except ValueError:
+            return None
+
+    def text(key):
+        return (form.get(key) or "").strip() or None
+
+    try:
+        fit = FitPreference(form.get("fit_preference") or "regular")
+    except ValueError:
+        fit = FitPreference.REGULAR
+
+    kibbe = None
+    if form.get("kibbe"):
+        try:
+            kibbe = KibbeType(form.get("kibbe"))
+        except ValueError:
+            kibbe = None
+
+    return UserProfile(
+        taste=DEFAULT_TASTE,
+        fit_preference=fit,
+        monthly_budget_usd=num("monthly_budget_usd"),
+        usual_size=text("usual_size"),
+        measurements=Measurements(
+            height_cm=num("height_cm"),
+            bust_cm=num("bust_cm"),
+            waist_cm=num("waist_cm"),
+            hip_cm=num("hip_cm"),
+            inseam_cm=num("inseam_cm"),
+        ),
+        kibbe=kibbe,
+    )
 
 
 def _serialize_ranking(item):
