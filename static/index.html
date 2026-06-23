@@ -45,7 +45,27 @@
       font-size: 13px;
     }
 
+    /* Ranking overlay on the thumbnail. */
+    .thumb { position: relative; }
+    .score-badge {
+      position: absolute; top: 8px; left: 8px;
+      background: rgba(17,17,17,.88); color: #fff;
+      font-size: 12px; font-weight: 700; line-height: 1;
+      padding: 5px 7px; border-radius: 6px;
+    }
+    .score-badge.unscored { background: rgba(120,120,120,.85); font-weight: 500; }
+
     .card-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
+
+    /* Sub-score chips: target · fit · taste · budget. */
+    .subscores { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
+    .chip {
+      font-size: 11px; padding: 2px 6px; border-radius: 10px;
+      background: #f0f0f0; color: #555; white-space: nowrap;
+    }
+    .chip .v { font-weight: 600; color: #111; }
+    .chip.dim { opacity: .5; }            /* missing data */
+    /* Tint by score value via inline style; confidence shown as opacity in JS. */
     .card-title {
       font-size: 14px; line-height: 1.3; font-weight: 500;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
@@ -79,6 +99,12 @@
       <label>
         <input type="checkbox" id="scoped" checked />
         Search my scoped sites (sites.txt) instead of Channel3
+      </label>
+    </p>
+    <p>
+      <label>
+        <input type="checkbox" id="rank" />
+        Rank for my profile (taste · fit/Kibbe · budget) — uses Haiku, scoped only
       </label>
     </p>
     <p>
@@ -195,6 +221,7 @@
       const query = document.getElementById("query").value;
 
       const scoped = document.getElementById("scoped").checked;
+      const wantRank = scoped && document.getElementById("rank").checked;
       const endpoint = scoped ? "/api/search_scoped" : "/api/search";
 
       if (!fileInput.files[0] && !query.trim()) {
@@ -207,9 +234,12 @@
         return;
       }
 
+      statusEl.textContent = wantRank ? "Searching + ranking..." : "Searching...";
+
       const fd = new FormData();
       if (fileInput.files[0]) fd.append("image", fileInput.files[0]);
       if (query) fd.append("query", query);
+      if (wantRank) fd.append("rank", "1");
 
       let data;
       try {
@@ -222,6 +252,7 @@
       }
 
       recordCost(data.cost);
+      if (data.rank_cost) recordCost(data.rank_cost);
 
       const products = data.products || [];
       if (products.length === 0) {
@@ -229,7 +260,9 @@
         return;
       }
 
-      statusEl.textContent = products.length + " result(s):";
+      const ranked = products.some((p) => p.ranking);
+      statusEl.textContent =
+        products.length + " result(s)" + (ranked ? ", ranked for your profile:" : ":");
       for (const p of products) {
         const li = document.createElement("li");
         li.className = "card";
@@ -257,6 +290,20 @@
         } else {
           thumb.classList.add("placeholder");
         }
+        // Overall score badge (top-left of the thumbnail) when ranked.
+        if (p.ranking) {
+          const badge = document.createElement("div");
+          if (p.ranking.overall == null) {
+            badge.className = "score-badge unscored";
+            badge.textContent = "—";
+            badge.title = "No usable signal to score this item";
+          } else {
+            badge.className = "score-badge";
+            badge.textContent = Math.round(p.ranking.overall * 100);
+            badge.title = "Overall match score";
+          }
+          thumb.appendChild(badge);
+        }
         link.appendChild(thumb);
 
         const body = document.createElement("div");
@@ -280,6 +327,37 @@
           domain.className = "card-domain";
           domain.textContent = p.domain;
           body.appendChild(domain);
+        }
+
+        // Sub-score chips: target · fit · taste · budget.
+        if (p.ranking) {
+          const order = ["target_match", "fit", "taste", "budget"];
+          const labels = { target_match: "target", fit: "fit", taste: "taste", budget: "budget" };
+          const chips = document.createElement("div");
+          chips.className = "subscores";
+          for (const key of order) {
+            const s = p.ranking.subscores[key];
+            const chip = document.createElement("span");
+            chip.className = "chip";
+            if (!s || s.value == null || s.confidence <= 0) {
+              chip.classList.add("dim");
+              chip.innerHTML = labels[key] + " <span class='v'>n/a</span>";
+              chip.title = (s && s.reason) || "missing data";
+            } else {
+              // Tint green→red by value; fade by confidence.
+              const hue = Math.round(s.value * 120); // 0=red, 120=green
+              chip.style.background = `hsl(${hue} 65% 92%)`;
+              chip.style.opacity = (0.45 + 0.55 * s.confidence).toFixed(2);
+              chip.innerHTML =
+                labels[key] + " <span class='v'>" + Math.round(s.value * 100) + "</span>";
+              chip.title =
+                `${labels[key]}: ${Math.round(s.value * 100)} (confidence ${Math.round(
+                  s.confidence * 100
+                )}%) — ${s.reason || ""}`;
+            }
+            chips.appendChild(chip);
+          }
+          body.appendChild(chips);
         }
 
         link.appendChild(body);

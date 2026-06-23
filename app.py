@@ -200,9 +200,10 @@ def search_scoped():
         return jsonify({"error": f"Scoped search failed: {e}"}), 502
 
     cost["backend"] = "scoped (serper)"
+
     # Reshape to the frontend's product shape {title,brand,price,domain,image,url}.
-    norm = [
-        {
+    def _shape(p):
+        return {
             "title": p.get("title", ""),
             "brand": "",
             "price": p.get("price", ""),
@@ -210,9 +211,41 @@ def search_scoped():
             "image": p.get("image", ""),
             "url": p.get("url", ""),
         }
-        for p in products
-    ]
-    return jsonify({"products": norm, "cost": cost})
+
+    # Optional: rank the candidates against the user profile (extra LLM cost).
+    if request.form.get("rank") and products:
+        if not os.environ.get("ANTHROPIC_API_KEY"):
+            return jsonify(
+                {"error": "ANTHROPIC_API_KEY must be set on the server to rank."}
+            ), 500
+        try:
+            from extract import rank_candidates
+
+            ranked, rank_cost = rank_candidates(products, target=query)
+        except Exception as e:
+            return jsonify({"error": f"Ranking failed: {e}"}), 502
+
+        by_url = {p.get("url", ""): p for p in products}
+        norm = []
+        for item in ranked:
+            base = _shape(by_url.get(item.garment.url, {"title": item.garment.title,
+                                                        "url": item.garment.url}))
+            base["ranking"] = _serialize_ranking(item)
+            norm.append(base)
+        return jsonify({"products": norm, "cost": cost, "rank_cost": rank_cost})
+
+    return jsonify({"products": [_shape(p) for p in products], "cost": cost})
+
+
+def _serialize_ranking(item):
+    """JSON-friendly ranking payload for one RankedItem."""
+    return {
+        "overall": item.overall,
+        "subscores": {
+            name: {"value": s.value, "confidence": s.confidence, "reason": s.reason}
+            for name, s in item.subscores.items()
+        },
+    }
 
 
 @app.route("/api/search", methods=["POST"])
