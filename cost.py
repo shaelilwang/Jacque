@@ -1,5 +1,5 @@
 """Cost estimation for Jacque, so we can compare spend before/after swapping
-the search backend (Anthropic web_search vs. Serper.dev scoped search).
+the search backend (Anthropic web_search vs. Channel3 vs. SerpApi Google Shopping).
 
 All figures are USD estimates. Token prices are list prices per 1M tokens;
 cache reads bill ~0.1x input and cache writes ~1.25x input. The web-search
@@ -16,8 +16,9 @@ TOKEN_PRICES = {
 # Anthropic web search is billed separately from tokens. Estimate ~$10/1000.
 WEB_SEARCH_USD_PER_CALL = 0.01
 
-# Serper.dev: 2,500 free credits, then ~$0.30-$1 per 1,000 queries by plan.
-SERPER_USD_PER_QUERY = 0.001
+# SerpApi: billed per successful search. ~$0.01/search on entry plans
+# (e.g. $75 / 7,500). Estimate — adjust SERPAPI_USD_PER_SEARCH to your plan.
+SERPAPI_USD_PER_SEARCH = 0.01
 
 
 def _rate(model, kind):
@@ -58,18 +59,18 @@ def add_response_usage(acc, response):
     return acc
 
 
-def serper_summary(num_queries):
-    """Cost summary for the Serper.dev search backend (no tokens)."""
-    total = num_queries * SERPER_USD_PER_QUERY
+def serpapi_summary(num_searches):
+    """Cost summary for the SerpApi Google Shopping backend (no tokens)."""
+    total = num_searches * SERPAPI_USD_PER_SEARCH
     return {
-        "model": "serper",
+        "model": "serpapi",
         "input_tokens": 0,
         "output_tokens": 0,
         "cache_read_input_tokens": 0,
         "cache_creation_input_tokens": 0,
-        "web_searches": num_queries,  # Serper API requests
+        "web_searches": num_searches,  # SerpApi search requests
         "cost_usd": round(total, 6),
-        "breakdown_usd": {"serper_queries": round(total, 6)},
+        "breakdown_usd": {"serpapi_searches": round(total, 6)},
     }
 
 

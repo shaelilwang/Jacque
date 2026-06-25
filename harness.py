@@ -1,339 +1,152 @@
-"""Scoped-site search harness — Serper.dev edition.
+"""Product search via SerpApi's Google Shopping API.
 
-Instead of Channel3 (or Anthropic web_search), this searches ONLY a list of
-websites you supply (`sites.txt`) using Serper.dev's Google Search API, scoped
-via `site:` operators and paginated via the `page` param. Retrieval is pure
-HTTP — no LLM tokens — so it's cheap and supports real pagination.
-
-(Replaces the Google Custom Search JSON API, which Google closed to new
-customers in Jan 2026 — new projects get a 403 even when the API is "enabled".)
+Replaces the Serper.dev web-search harness. Google Shopping returns product
+metadata directly — title, price, merchant, thumbnail — so there's no URL
+filtering, site scoping, or og:image scraping to do anymore: every result is
+already a buyable product. Results are localized to the US and can be bounded
+by an advanced price filter.
 
 Pipeline elsewhere is unchanged: image -> Sonnet describes items+style -> query.
-This module consumes that query text and returns product links from the sites.
+This module consumes that query text and returns Google Shopping products.
 
 Setup (you supply):
-  - Create a Serper.dev account, copy your API key -> SERPER_API_KEY
+  - Create a SerpApi account, copy your API key -> SERPAPI_API_KEY
+Docs: https://serpapi.com/google-shopping-api
 """
 
-import concurrent.futures
 import os
-import re
-import time
-from urllib.parse import urljoin, urlparse
 
 import requests
 
 import cost as cost_mod
 
-SERPER_ENDPOINT = "https://google.serper.dev/search"
-DEFAULT_SITES_FILE = os.path.join(os.path.dirname(__file__), "sites.txt")
-# Serper returns up to ~10 organic results per page; paginate with `page`. Each
-# page is one billed query. The product filter thins each page, so fetch several
-# pages to keep enough buyable results flowing through for downstream ranking.
-# 8 pages = up to 80 raw candidates (~8 Serper credits/search).
-# (An `inurl:product` query bias was tried but returns nothing when combined
-# with the grouped `site:` OR clause, so we filter post-hoc instead.)
-MAX_PAGES = 8
-# Serper's free tier rate-limits rapid bursts, so pace pages slightly and retry
-# transient 403/429s with backoff before giving up.
-SERPER_PAGE_DELAY = 0.4
-SERPER_MAX_RETRIES = 2
+SERPAPI_ENDPOINT = "https://serpapi.com/search.json"
 
-# Keep only individual *buyable* product pages — drop homepages, category /
-# collection listings, and editorial (magazine/lookbook/stylebook) content.
-# A URL is treated as a product page if its path matches one of these markers.
-# Extend this list if you add a retailer that uses a different URL scheme.
-PRODUCT_URL_PATTERNS = [
-    r"/products?[/.]",    # /products/, /product/ (Everlane, Uniqlo, COS, SSENSE)
-    r"/product-\d",       # /product-12345 numeric ids (not /product-care etc.)
-    r"/productpage",      # COS / H&M-style productpage.<id>.html
-    r"/p/",               # many retailers
-    r"/dp/",              # Amazon-style
-    r"/pd/",
-    r"/item(s)?[/.]",
-    r"/itm/",
-    r"/goods/",
-    r"-p-?\d",            # slug-p-12345 style product ids
-]
-# Even with a product marker, never treat these editorial/listing paths as buyable.
-NON_PRODUCT_URL_PATTERNS = [
-    r"/collections?/",
-    r"/contents?/",
-    r"/magazine",
-    r"/lifewear",
-    r"/stylingbook",
-    r"/stylehint",
-    r"/lookbook",
-    r"/feature",
-    r"/stor(y|ies)",
-    r"/journal",
-    r"/blog",
-    r"/guide",
-    r"/product-care",     # care guides, not products
-    r"/reviews?\b",       # product reviews subpage, not the buy page
-]
-_PRODUCT_RE = re.compile("|".join(PRODUCT_URL_PATTERNS), re.I)
-_NON_PRODUCT_RE = re.compile("|".join(NON_PRODUCT_URL_PATTERNS), re.I)
+# US localization. Google Shopping listings, availability, and prices are
+# region-specific, so we pin country / language / domain explicitly.
+US_LOCALE = {
+    "gl": "us",
+    "hl": "en",
+    "google_domain": "google.com",
+    "location": "United States",
+}
 
 
-def _is_buyable(url):
-    """Heuristic: True only for individual product (buyable) pages.
+def _price_param(value):
+    """Normalize a price bound for SerpApi, which requires an integer > 0.
 
-    Drops homepages and category/editorial pages so results are things you can
-    actually add to cart, not catalogs.
+    Coerces floats to a rounded int; returns None for unset, non-numeric, or
+    non-positive values so the param is simply omitted.
     """
-    path = urlparse(url).path
-    if not path or path == "/":
-        return False  # homepage
-    if _NON_PRODUCT_RE.search(path):
-        return False  # editorial / collection listing
-    return bool(_PRODUCT_RE.search(path))
-
-
-# Gender detection from URL/title. Check women first — "women" contains "men".
-_WOMEN_RE = re.compile(r"wom[ae]n|ladies|female|girls?", re.I)
-_MEN_RE = re.compile(r"\bmen\b|men['’`]s|\bmens\b|\bman\b|male|boys?", re.I)
-
-
-def _detect_gender(url, title=""):
-    """Best-effort 'women' / 'men' from a result, or None if unclear (e.g. unisex)."""
-    text = f"{url} {title}"
-    if _WOMEN_RE.search(text):
-        return "women"
-    if _MEN_RE.search(text):
-        return "men"
-    return None
-
-
-def _dedup_key(title, url):
-    """A product identity key that collapses color/locale/brand variants.
-
-    Retailers list the same product once per colorway and per country site, e.g.
-    "The Day Glove | Black - Everlane" vs "...| Canvas - Everlane", or the same
-    item on /ph/ and /my/. We key on the product name only: the title up to the
-    first ` | ` or ` - ` (which separate color/brand/region tails), normalized.
-    """
-    name = title or url
-    name = re.split(r"\s*\|\s*", name, 1)[0]   # drop "| Color - Brand" tail
-    name = re.split(r"\s+-\s+", name, 1)[0]    # drop " - Color"/" - Brand" tail
-    name = re.sub(r"[®™]", "", name)
-    name = re.sub(r"[^a-z0-9]+", " ", name.lower()).strip()
-    return name or url.lower()
-
-
-# --- Product images -------------------------------------------------------
-# Serper returns no images, so we read each product page's og:image (the
-# social-preview image retailers embed in their <head>). Fetches run
-# concurrently with a tight timeout, and results are cached across searches.
-_BROWSER_UA = (
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 "
-    "(KHTML, like Gecko) Chrome/124.0 Safari/537.36"
-)
-_META_TAG_RE = re.compile(r"<meta\b[^>]*>", re.I)
-_OG_IMAGE_PROP_RE = re.compile(
-    r"""(?:property|name)\s*=\s*["'](?:og:image(?::secure_url|:url)?|twitter:image)["']""",
-    re.I,
-)
-_CONTENT_RE = re.compile(r"""content\s*=\s*["']([^"']+)["']""", re.I)
-_image_cache = {}  # url -> image url (or "")
-
-
-def _parse_og_image(html, base_url):
-    """Pull the og:image / twitter:image URL from a page's <head> markup."""
-    head = html[:200_000]  # meta tags live near the top; cap work
-    for tag in _META_TAG_RE.findall(head):
-        if _OG_IMAGE_PROP_RE.search(tag):
-            m = _CONTENT_RE.search(tag)
-            if m and m.group(1).strip():
-                img = urljoin(base_url, m.group(1).strip())
-                # Upgrade to https so images load on an https-served frontend.
-                return re.sub(r"^http://", "https://", img)
-    return ""
-
-
-def _fetch_og_image(url, timeout=5):
-    """Best-effort product image for one URL (cached). Returns "" on any failure."""
-    if url in _image_cache:
-        return _image_cache[url]
-    image = ""
+    if value is None:
+        return None
     try:
-        resp = requests.get(
-            url,
-            headers={"User-Agent": _BROWSER_UA, "Accept": "text/html"},
-            timeout=timeout,
-            stream=True,
-        )
-        if resp.status_code == 200:
-            # Read only the first chunk — enough to reach the <head> meta tags.
-            chunk = next(resp.iter_content(200_000, decode_unicode=True), "")
-            if isinstance(chunk, bytes):
-                chunk = chunk.decode("utf-8", "ignore")
-            image = _parse_og_image(chunk, url)
-        resp.close()
-    except requests.RequestException:
-        image = ""
-    _image_cache[url] = image
-    return image
+        n = int(round(float(value)))
+    except (TypeError, ValueError):
+        return None
+    return n if n > 0 else None
 
 
-def attach_images(products, max_workers=8):
-    """Populate each product's `image` by fetching og:image concurrently."""
-    todo = [p for p in products if not p.get("image")]
-    if not todo:
-        return products
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = {ex.submit(_fetch_og_image, p["url"]): p for p in todo}
-        for fut in concurrent.futures.as_completed(futures):
-            try:
-                futures[fut]["image"] = fut.result()
-            except Exception:
-                futures[fut]["image"] = ""
-    return products
+def _to_product(item):
+    """Map one SerpApi `shopping_results` entry to our flat product shape.
 
-
-def load_sites(path=DEFAULT_SITES_FILE):
-    """Read the scoped website list. One domain per line; '#' comments allowed.
-
-    URLs are normalized to bare domains (drop scheme + path).
+    Google Shopping links point at the Google product page (`product_link`);
+    `source` is the merchant (e.g. "Nordstrom"), `thumbnail` the product image.
     """
-    if not os.path.exists(path):
-        raise FileNotFoundError(
-            f"{path} not found. Copy sites.example.txt to sites.txt and add your sites."
-        )
-    sites = []
-    with open(path) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            domain = re.sub(r"^https?://", "", line).strip("/").split("/")[0]
-            if domain:
-                sites.append(domain)
-    return sites
+    return {
+        "title": item.get("title", ""),
+        "url": item.get("product_link") or item.get("link") or "",
+        "price": item.get("price", ""),
+        "extracted_price": item.get("extracted_price"),  # numeric, for sorting/filtering
+        "site": item.get("source", ""),                  # merchant name
+        "image": item.get("thumbnail", ""),
+        "rating": item.get("rating"),
+        "reviews": item.get("reviews"),
+        "delivery": item.get("delivery", ""),
+        "product_id": item.get("product_id", ""),
+    }
 
 
-# A real price has a currency symbol — this avoids grabbing stray numbers like
-# delivery thresholds ("Free delivery over $100") or rating counts.
-_MONEY_RE = re.compile(r"[$£€]\s?\d[\d,]*(?:\.\d{1,2})?")
+def search_shopping(query, max_results=10, min_price=None, max_price=None):
+    """Search Google Shopping (US) via SerpApi.
 
-
-def _extract_price(item):
-    """Best-effort price from a Serper organic result (often absent for web
-    results). Only accepts a currency-prefixed amount to avoid junk."""
-    attrs = item.get("attributes") or {}
-    for cand in (
-        item.get("price"),
-        item.get("priceRange"),
-        attrs.get("Price"),
-        attrs.get("price"),
-    ):
-        if cand:
-            m = _MONEY_RE.search(str(cand))
-            if m:
-                return m.group(0)
-    return ""
-
-
-def _serper_post(key, q, page, num=10):
-    """POST one search page, retrying transient 403/429 rate limits with backoff."""
-    resp = None
-    for attempt in range(SERPER_MAX_RETRIES + 1):
-        resp = requests.post(
-            SERPER_ENDPOINT,
-            headers={"X-API-KEY": key, "Content-Type": "application/json"},
-            json={"q": q, "num": num, "page": page},
-            timeout=20,
-        )
-        if resp.status_code == 200 or resp.status_code not in (403, 429):
-            return resp
-        if attempt < SERPER_MAX_RETRIES:
-            time.sleep(0.8 * (attempt + 1))
-    return resp
-
-
-def serper_search(query, sites, max_results=30, max_pages=MAX_PAGES,
-                  products_only=True, gender=None):
-    """Query Serper.dev's Google Search API, scoped to `sites`, with paging.
-
-    With `products_only` (default), only individual buyable product pages are
-    kept — homepages, collection listings, and editorial content are dropped.
-    `gender` ("women"/"men") biases the query and drops opposite-gender results
-    (items of unclear/unisex gender are kept).
-
-    Returns (products, requests_made). Each element is {title, url, price, site}.
+    `min_price` / `max_price` (USD) apply Google Shopping's advanced price
+    filter; either bound is optional. Returns (products, cost), where each
+    product is a flat dict (see `_to_product`).
     """
-    key = os.environ.get("SERPER_API_KEY")
+    key = os.environ.get("SERPAPI_API_KEY")
     if not key:
-        raise RuntimeError("SERPER_API_KEY must be set.")
-    if not sites:
-        raise ValueError("No sites configured — add domains to sites.txt.")
+        raise RuntimeError("SERPAPI_API_KEY must be set.")
+    if not query or not query.strip():
+        raise ValueError("Query is required.")
 
-    # Scope to the supplied sites with `site:` operators; bias by gender if set.
-    site_clause = " OR ".join(f"site:{d}" for d in sites)
-    gender_term = {"women": "women's", "men": "men's"}.get(gender, "")
-    q = f"{gender_term} {query} ({site_clause})".strip() if gender_term else \
-        f"{query} ({site_clause})"
+    params = {
+        "engine": "google_shopping",
+        "q": query.strip(),
+        "api_key": key,
+        **US_LOCALE,
+    }
+    # Advanced price filter — dedicated min_price / max_price params. SerpApi
+    # requires each to be an integer > 0, so coerce and drop anything else.
+    lo, hi = _price_param(min_price), _price_param(max_price)
+    if lo is not None:
+        params["min_price"] = lo
+    if hi is not None:
+        params["max_price"] = hi
 
-    products = []
-    seen_keys = set()  # collapse color/locale/brand variants of the same product
-    requests_made = 0
-    page = 1
-    # Filtering thins each page, so request full pages (10) and trim at the end.
-    while len(products) < max_results and requests_made < max_pages:
-        if page > 1:
-            time.sleep(SERPER_PAGE_DELAY)  # pace pages under the free-tier limit
-        resp = _serper_post(key, q, page)
-        requests_made += 1
-        if resp.status_code != 200:
-            # Already have results? Degrade gracefully rather than failing the
-            # whole search on a transient later-page rate limit.
-            if products:
-                break
-            raise RuntimeError(
-                f"Serper returned {resp.status_code}: {resp.text[:300]}"
-            )
-        data = resp.json()
-        organic = data.get("organic", []) or []
-        for it in organic:
-            link = it.get("link", "")
-            # Keep only individual product pages (drop homepages/listings/editorial).
-            if products_only and not _is_buyable(link):
-                continue
-            # Gender filter: drop clearly opposite-gender items (keep unisex/unknown).
-            if gender in ("women", "men"):
-                detected = _detect_gender(link, it.get("title", ""))
-                if detected and detected != gender:
-                    continue
-            # Skip color/locale/brand variants of a product we already have.
-            dedup_key = _dedup_key(it.get("title", ""), link)
-            if dedup_key in seen_keys:
-                continue
-            seen_keys.add(dedup_key)
-            domain = re.sub(r"^https?://", "", link).split("/")[0]
-            products.append(
-                {
-                    "title": it.get("title", ""),
-                    "url": link,
-                    "site": domain,
-                    "price": _extract_price(it),
-                    "snippet": it.get("snippet", ""),
-                }
-            )
-        if len(organic) < 10:
-            break  # no more results
-        page += 1
+    resp = requests.get(SERPAPI_ENDPOINT, params=params, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"SerpApi returned {resp.status_code}: {resp.text[:300]}")
 
-    return products[:max_results], requests_made
+    data = resp.json()
+    results = data.get("shopping_results") or []
+    products = [_to_product(it) for it in results if it.get("title")]
+    # One API call == one billed SerpApi search.
+    return products[:max_results], cost_mod.serpapi_summary(1)
 
 
-def search_sites(query, sites, max_results=30, with_images=True, gender=None):
-    """Search the scoped sites for products matching `query`.
+def _agg_key(product):
+    """Identity for de-duplicating a product across queries: prefer the Google
+    product_id, else a normalized title, else the URL."""
+    pid = product.get("product_id")
+    if pid:
+        return f"id:{pid}"
+    title = (product.get("title") or "").lower().strip()
+    return f"t:{title}" if title else f"u:{product.get('url', '')}"
 
-    Returns (products, cost). Raises if the Serper key or sites are missing.
-    When `with_images`, each product is enriched with its og:image URL.
-    `gender` ("women"/"men") filters results to that gender (unisex kept).
+
+def search_queries(queries, max_results_per_query=10, max_total=40,
+                   min_price=None, max_price=None):
+    """Run several queries through Google Shopping and aggregate the results.
+
+    The analysis step produces 3-5 queries at varying specificity; this fans them
+    out, then merges into one de-duplicated list (the same product can surface for
+    more than one query). Each product records which queries matched it in
+    `matched_queries` — provenance for the downstream reranker. Results keep
+    first-seen order, capped at `max_total`.
+
+    Returns (products, cost); cost counts one SerpApi search per non-empty query.
     """
-    products, requests_made = serper_search(query, sites, max_results, gender=gender)
-    if with_images:
-        attach_images(products)
-    return products, cost_mod.serper_summary(requests_made)
+    by_key = {}
+    order = []
+    searches = 0
+    for q in queries or []:
+        if not q or not q.strip():
+            continue
+        items, _ = search_shopping(
+            q, max_results=max_results_per_query, min_price=min_price, max_price=max_price
+        )
+        searches += 1
+        for p in items:
+            key = _agg_key(p)
+            if key in by_key:
+                if q not in by_key[key]["matched_queries"]:
+                    by_key[key]["matched_queries"].append(q)
+            else:
+                p = dict(p)
+                p["matched_queries"] = [q]
+                by_key[key] = p
+                order.append(key)
+
+    products = [by_key[k] for k in order][:max_total]
+    return products, cost_mod.serpapi_summary(searches)

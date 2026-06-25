@@ -32,10 +32,80 @@ def _api_key():
     return os.environ.get("CHANNEL3_API_KEY")
 
 
-def _llm_assist(image_bytes, media_type):
-    """Ask Anthropic Sonnet to describe the image's items and style separately.
+# One Sonnet vision call turns an uploaded item photo into: structured
+# attributes, a context-free versatility score, and the shopping queries that
+# fan out to Google Shopping. "Vibe" matters more than an exact match.
+ANALYSIS_PROMPT = (
+    "You are a fashion stylist analyzing a product image so a shopper can find "
+    "SIMILAR items to buy — not the identical product. Vibe matters more than an "
+    "exact match: the queries should find items with a similar FEEL.\n\n"
+    "Look at the main item in the image and return:\n"
+    "- its attributes: category, silhouette, color family, pattern, a best-guess "
+    "material, formality, and 2-4 free-text aesthetic/vibe tags;\n"
+    "- versatility_base: a 0-100 score for how neutral/classic the item is judged "
+    "from its attributes ALONE, with no wardrobe context, plus a one-line rationale;\n"
+    "- queries: 3-5 shopping search strings at VARYING specificity — include one "
+    "tight, one broad, and one aesthetic-led.\n\n"
+    "Do NOT put price, brand, or size in any query. If you are unsure about the "
+    "material, say so in material_guess rather than inventing it."
+)
 
-    Returns (items, style). Used to auto-fill the Channel3 search query.
+ANALYSIS_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "item": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "e.g. 'blazer', 'ankle boot'"},
+                "silhouette": {"type": "string", "description": "e.g. 'oversized boxy', 'fitted'"},
+                "color_family": {"type": "string", "description": "e.g. 'warm neutral / taupe'"},
+                "pattern": {"type": "string", "description": "'solid', 'stripe', etc."},
+                "material_guess": {
+                    "type": "string",
+                    "description": "best visual guess; say so if unsure rather than inventing",
+                },
+                "formality": {"type": "string", "enum": ["casual", "smart casual", "formal"]},
+                "aesthetic_tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "2-4 free-text vibe tags, e.g. 'relaxed tailoring', 'earthy minimalist'",
+                },
+            },
+            "required": [
+                "category", "silhouette", "color_family", "pattern",
+                "material_guess", "formality", "aesthetic_tags",
+            ],
+            "additionalProperties": False,
+        },
+        "versatility_base": {
+            "type": "object",
+            "properties": {
+                "score": {
+                    "type": "integer",
+                    "description": "0-100, how neutral/classic from attributes alone, no wardrobe context",
+                },
+                "rationale": {"type": "string", "description": "one line"},
+            },
+            "required": ["score", "rationale"],
+            "additionalProperties": False,
+        },
+        "queries": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "3-5 shopping search strings at varying specificity "
+                           "(one tight, one broad, one aesthetic-led); no price/brand/size",
+        },
+    },
+    "required": ["item", "versatility_base", "queries"],
+    "additionalProperties": False,
+}
+
+
+def analyze_image(image_bytes, media_type):
+    """One Sonnet vision call analyzing the uploaded item.
+
+    Returns (analysis, cost), where `analysis` matches ANALYSIS_SCHEMA: item
+    attributes, a versatility_base score, and 3-5 shopping queries.
     """
     import anthropic
 
@@ -51,45 +121,13 @@ def _llm_assist(image_bytes, media_type):
                 "content": [
                     {
                         "type": "image",
-                        "source": {
-                            "type": "base64",
-                            "media_type": media_type,
-                            "data": b64,
-                        },
+                        "source": {"type": "base64", "media_type": media_type, "data": b64},
                     },
-                    {
-                        "type": "text",
-                        "text": (
-                            "This image is a sample for a product shopping search. "
-                            "Describe it for that purpose. Return two separate "
-                            "descriptions: (1) the items/products shown in the image, "
-                            "and (2) the overall visual style and aesthetic of the "
-                            "image (colors, materials, vibe)."
-                        ),
-                    },
+                    {"type": "text", "text": ANALYSIS_PROMPT},
                 ],
             }
         ],
-        output_config={
-            "format": {
-                "type": "json_schema",
-                "schema": {
-                    "type": "object",
-                    "properties": {
-                        "items": {
-                            "type": "string",
-                            "description": "The items or products visible in the image.",
-                        },
-                        "style": {
-                            "type": "string",
-                            "description": "The visual style/aesthetic of the sample image.",
-                        },
-                    },
-                    "required": ["items", "style"],
-                    "additionalProperties": False,
-                },
-            }
-        },
+        output_config={"format": {"type": "json_schema", "schema": ANALYSIS_SCHEMA}},
     )
 
     usage = cost_mod.empty_usage()
@@ -97,8 +135,7 @@ def _llm_assist(image_bytes, media_type):
 
     # output_config.format guarantees the first text block is valid JSON.
     text = next((b.text for b in response.content if b.type == "text"), "")
-    data = json.loads(text)
-    return data["items"], data["style"], cost_mod.summarize(SONNET_MODEL, usage)
+    return json.loads(text), cost_mod.summarize(SONNET_MODEL, usage)
 
 
 def _format_price(offer):
@@ -154,8 +191,8 @@ def index():
 
 @app.route("/api/assist", methods=["POST"])
 def assist():
-    """Text-assist step: Sonnet describes the image's items + style, which the
-    frontend drops into the query box before searching Channel3."""
+    """One Sonnet call analyzes the uploaded image: returns item attributes, a
+    versatility_base score, and 3-5 shopping queries (no search yet)."""
     if not os.environ.get("ANTHROPIC_API_KEY"):
         return jsonify({"error": "ANTHROPIC_API_KEY is not set on the server."}), 500
 
@@ -165,22 +202,97 @@ def assist():
 
     media_type = file.mimetype or "image/jpeg"
     try:
-        items, style, cost = _llm_assist(file.read(), media_type)
+        analysis, cost = analyze_image(file.read(), media_type)
     except Exception as e:
-        return jsonify({"error": f"LLM assist failed: {e}"}), 502
+        return jsonify({"error": f"Image analysis failed: {e}"}), 502
 
-    cost["backend"] = "assist (sonnet)"
-    query = f"{items} Style: {style}"
-    return jsonify({"items": items, "style": style, "query": query, "cost": cost})
+    cost["backend"] = "analyze (sonnet)"
+    return jsonify({"analysis": analysis, "cost": cost})
+
+
+@app.route("/api/discover", methods=["POST"])
+def discover():
+    """Image pipeline: one Sonnet call analyzes the uploaded item, then its 3-5
+    queries are searched on Google Shopping (SerpApi) and aggregated. The
+    aggregated products are the handoff to the reranker (built separately)."""
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return jsonify({"error": "ANTHROPIC_API_KEY is not set on the server."}), 500
+    if not os.environ.get("SERPAPI_API_KEY"):
+        return jsonify({"error": "SERPAPI_API_KEY is not set on the server."}), 500
+
+    file = request.files.get("image")
+    if file is None or file.filename == "":
+        return jsonify({"error": "No image uploaded."}), 400
+
+    media_type = file.mimetype or "image/jpeg"
+    try:
+        analysis, analyze_cost = analyze_image(file.read(), media_type)
+    except Exception as e:
+        return jsonify({"error": f"Image analysis failed: {e}"}), 502
+    analyze_cost["backend"] = "analyze (sonnet)"
+
+    min_price = _form_price(request.form, "min_price")
+    max_price = _form_price(request.form, "max_price")
+    try:
+        from harness import search_queries
+
+        products, search_cost = search_queries(
+            analysis.get("queries", []), min_price=min_price, max_price=max_price
+        )
+    except Exception as e:
+        return jsonify({"error": f"Google Shopping search failed: {e}"}), 502
+    search_cost["backend"] = "google shopping (serpapi)"
+
+    # Rerank the aggregated candidates against the reference vibe. Per-dimension
+    # scores stay separate so the frontend can re-weight and re-sort them.
+    try:
+        from rerank import rerank
+
+        scores, rerank_cost = rerank(analysis, products)
+    except Exception as e:
+        return jsonify({"error": f"Rerank failed: {e}"}), 502
+    by_index = {s["index"]: s for s in scores}
+
+    # matched_queries records which analysis queries surfaced each item; `score`
+    # is the per-dimension rerank result (None when the item wasn't scored).
+    norm = [
+        {
+            "title": p.get("title", ""),
+            "brand": "",
+            "price": p.get("price", ""),
+            "domain": p.get("site", ""),
+            "image": p.get("image", ""),
+            "url": p.get("url", ""),
+            "matched_queries": p.get("matched_queries", []),
+            "score": by_index.get(i),
+        }
+        for i, p in enumerate(products)
+    ]
+    return jsonify({
+        "analysis": analysis,
+        "products": norm,
+        "costs": [analyze_cost, search_cost, rerank_cost],
+    })
+
+
+def _form_price(form, key):
+    """Parse an optional price bound from the form. Blank/invalid -> None."""
+    raw = (form.get(key) or "").strip()
+    if not raw:
+        return None
+    try:
+        return float(raw)
+    except ValueError:
+        return None
 
 
 @app.route("/api/search_scoped", methods=["POST"])
 def search_scoped():
-    """Harness backend: search YOUR scoped sites (sites.txt) via the Serper.dev
-    search API instead of Channel3. Consumes the query text."""
-    if not os.environ.get("SERPER_API_KEY"):
+    """Harness backend: search Google Shopping (US) via SerpApi instead of
+    Channel3. Consumes the query text plus optional min/max price bounds."""
+    if not os.environ.get("SERPAPI_API_KEY"):
         return jsonify(
-            {"error": "SERPER_API_KEY must be set on the server."}
+            {"error": "SERPAPI_API_KEY must be set on the server."}
         ), 500
 
     query = (request.form.get("query") or "").strip()
@@ -189,119 +301,30 @@ def search_scoped():
             {"error": "No query. Use 'Fill description' or type a description first."}
         ), 400
 
-    gender = (request.form.get("gender") or "").strip().lower()
-    if gender not in ("women", "men"):
-        gender = None
+    min_price = _form_price(request.form, "min_price")
+    max_price = _form_price(request.form, "max_price")
 
     try:
-        from harness import load_sites, search_sites
+        from harness import search_shopping
 
-        sites = load_sites()
-        products, cost = search_sites(query, sites, gender=gender)
-    except FileNotFoundError as e:
-        return jsonify({"error": str(e)}), 500
+        products, cost = search_shopping(query, min_price=min_price, max_price=max_price)
     except Exception as e:
-        return jsonify({"error": f"Scoped search failed: {e}"}), 502
+        return jsonify({"error": f"Google Shopping search failed: {e}"}), 502
 
-    cost["backend"] = "scoped (serper)"
-
+    cost["backend"] = "google shopping (serpapi)"
     # Reshape to the frontend's product shape {title,brand,price,domain,image,url}.
-    def _shape(p):
-        return {
+    norm = [
+        {
             "title": p.get("title", ""),
             "brand": "",
             "price": p.get("price", ""),
-            "domain": p.get("site", ""),
+            "domain": p.get("site", ""),  # merchant name (SerpApi `source`)
             "image": p.get("image", ""),
             "url": p.get("url", ""),
         }
-
-    # Optional: rank the candidates against the user profile (extra LLM cost).
-    if request.form.get("rank") and products:
-        if not os.environ.get("ANTHROPIC_API_KEY"):
-            return jsonify(
-                {"error": "ANTHROPIC_API_KEY must be set on the server to rank."}
-            ), 500
-        try:
-            from extract import rank_candidates
-
-            profile = _profile_from_form(request.form)
-            ranked, rank_cost = rank_candidates(products, target=query, profile=profile)
-        except Exception as e:
-            return jsonify({"error": f"Ranking failed: {e}"}), 502
-
-        by_url = {p.get("url", ""): p for p in products}
-        norm = []
-        for item in ranked:
-            base = _shape(by_url.get(item.garment.url, {"title": item.garment.title,
-                                                        "url": item.garment.url}))
-            base["ranking"] = _serialize_ranking(item)
-            norm.append(base)
-        return jsonify({"products": norm, "cost": cost, "rank_cost": rank_cost})
-
-    return jsonify({"products": [_shape(p) for p in products], "cost": cost})
-
-
-def _profile_from_form(form):
-    """Build a UserProfile from submitted form fields. Blanks stay None (honest).
-
-    The taste spec is hardcoded for now; everything else comes from the user.
-    """
-    from profiles import (
-        DEFAULT_TASTE,
-        FitPreference,
-        KibbeType,
-        Measurements,
-        UserProfile,
-    )
-
-    def num(key):
-        raw = (form.get(key) or "").strip()
-        try:
-            return float(raw) if raw else None
-        except ValueError:
-            return None
-
-    def text(key):
-        return (form.get(key) or "").strip() or None
-
-    try:
-        fit = FitPreference(form.get("fit_preference") or "regular")
-    except ValueError:
-        fit = FitPreference.REGULAR
-
-    kibbe = None
-    if form.get("kibbe"):
-        try:
-            kibbe = KibbeType(form.get("kibbe"))
-        except ValueError:
-            kibbe = None
-
-    return UserProfile(
-        taste=DEFAULT_TASTE,
-        fit_preference=fit,
-        monthly_budget_usd=num("monthly_budget_usd"),
-        usual_size=text("usual_size"),
-        measurements=Measurements(
-            height_cm=num("height_cm"),
-            bust_cm=num("bust_cm"),
-            waist_cm=num("waist_cm"),
-            hip_cm=num("hip_cm"),
-            inseam_cm=num("inseam_cm"),
-        ),
-        kibbe=kibbe,
-    )
-
-
-def _serialize_ranking(item):
-    """JSON-friendly ranking payload for one RankedItem."""
-    return {
-        "overall": item.overall,
-        "subscores": {
-            name: {"value": s.value, "confidence": s.confidence, "reason": s.reason}
-            for name, s in item.subscores.items()
-        },
-    }
+        for p in products
+    ]
+    return jsonify({"products": norm, "cost": cost})
 
 
 @app.route("/api/search", methods=["POST"])

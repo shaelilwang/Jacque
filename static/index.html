@@ -7,19 +7,6 @@
   <style>
     body { font-family: system-ui, -apple-system, sans-serif; margin: 24px; }
 
-    /* Profile inputs (shown when ranking). */
-    #profile-details { margin: 4px 0 8px; max-width: 640px; }
-    #profile-details summary { cursor: pointer; font-weight: 600; }
-    .profile-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
-      gap: 10px 14px;
-      margin: 10px 0;
-    }
-    .profile-grid label { display: flex; flex-direction: column; font-size: 13px; gap: 3px; }
-    .profile-grid input, .profile-grid select { padding: 4px 6px; font-size: 14px; }
-    .hint { font-size: 12px; color: #666; margin: 6px 0; }
-
     /* Responsive product grid: cards size themselves, wrap to fit. */
     #results {
       list-style: none;
@@ -58,27 +45,7 @@
       font-size: 13px;
     }
 
-    /* Ranking overlay on the thumbnail. */
-    .thumb { position: relative; }
-    .score-badge {
-      position: absolute; top: 8px; left: 8px;
-      background: rgba(17,17,17,.88); color: #fff;
-      font-size: 12px; font-weight: 700; line-height: 1;
-      padding: 5px 7px; border-radius: 6px;
-    }
-    .score-badge.unscored { background: rgba(120,120,120,.85); font-weight: 500; }
-
     .card-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
-
-    /* Sub-score chips: target · fit · taste · budget. */
-    .subscores { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 2px; }
-    .chip {
-      font-size: 11px; padding: 2px 6px; border-radius: 10px;
-      background: #f0f0f0; color: #555; white-space: nowrap;
-    }
-    .chip .v { font-weight: 600; color: #111; }
-    .chip.dim { opacity: .5; }            /* missing data */
-    /* Tint by score value via inline style; confidence shown as opacity in JS. */
     .card-title {
       font-size: 14px; line-height: 1.3; font-weight: 500;
       display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
@@ -86,6 +53,40 @@
     }
     .card-price { font-size: 14px; font-weight: 600; }
     .card-domain { font-size: 12px; color: #888; margin-top: auto; }
+    .card-matches { font-size: 11px; color: #aaa; }
+
+    /* Analysis panel (from the Sonnet image analysis). */
+    .analysis {
+      border: 1px solid #e5e5e5; border-radius: 10px; background: #fafafa;
+      padding: 12px 14px; margin: 8px 0; max-width: 640px;
+    }
+    .analysis .row { font-size: 14px; margin: 4px 0; }
+    .analysis .row.muted { color: #777; font-size: 13px; }
+    .chip {
+      display: inline-block; font-size: 12px; padding: 2px 8px; margin: 2px 3px 2px 0;
+      border-radius: 999px; background: #ececf3; color: #444;
+    }
+    .chip.q { background: #e7f0ff; color: #245; font-family: ui-monospace, monospace; }
+
+    /* Rerank scores on cards. */
+    .thumb { position: relative; }
+    .score-badge {
+      position: absolute; top: 8px; left: 8px; background: rgba(17,17,17,.88);
+      color: #fff; font-size: 12px; font-weight: 700; padding: 4px 7px; border-radius: 6px;
+    }
+    .subscores { font-size: 11px; color: #555; display: flex; flex-wrap: wrap; gap: 8px; }
+    .notes { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12.5px; line-height: 1.4; color: #2a2a2a; }
+    .notes li { margin: 2px 0; }
+
+    /* Re-weight controls. */
+    #weights {
+      border: 1px solid #e5e5e5; border-radius: 10px; padding: 12px 14px; margin: 12px 0;
+      max-width: 660px; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center;
+    }
+    #weights .lbl { font-weight: 600; font-size: 13px; }
+    #weights label { font-size: 13px; display: flex; align-items: center; gap: 6px; }
+    #weights input[type=range] { width: 110px; }
+    #weights .val { font-variant-numeric: tabular-nums; color: #666; width: 2.2em; text-align: right; }
   </style>
 </head>
 <body>
@@ -98,7 +99,7 @@
       <span> (optional — leave empty to search by description only)</span>
     </p>
     <p>
-      <button type="button" id="assist-btn">Fill description (Sonnet)</button>
+      <button type="button" id="assist-btn">Find similar from image (Sonnet → Google Shopping)</button>
       <span id="assist-status"></span>
     </p>
     <div id="assist-detail"></div>
@@ -109,69 +110,17 @@
       </label>
     </p>
     <p>
-      <label>Shopping for:
-        <select id="gender">
-          <option value="">Any</option>
-          <option value="women">Women's</option>
-          <option value="men">Men's</option>
-        </select>
-      </label>
-    </p>
-    <p>
       <label>
         <input type="checkbox" id="scoped" checked />
-        Search my scoped sites (sites.txt) instead of Channel3
+        Search Google Shopping (SerpApi) instead of Channel3
       </label>
     </p>
-    <p>
-      <label>
-        <input type="checkbox" id="rank" />
-        Rank for my profile (taste · fit/Kibbe · budget) — uses Haiku, scoped only
-      </label>
+    <p id="price-filter">
+      <label>Price range (USD, optional):</label>
+      <input type="number" id="min_price" min="0" step="1" placeholder="min" style="width:80px" />
+      <span>–</span>
+      <input type="number" id="max_price" min="0" step="1" placeholder="max" style="width:80px" />
     </p>
-    <details id="profile-details">
-      <summary>Your profile (used when ranking)</summary>
-      <div id="profile-form">
-        <p class="hint">Taste spec (fixed for now):
-          <b>sculptural · subversive · androgynous · editorial · neo-romantic</b></p>
-        <div class="profile-grid">
-          <label>Height (cm)<input type="number" id="height_cm" step="0.1" placeholder="e.g. 170" /></label>
-          <label>Bust (cm)<input type="number" id="bust_cm" step="0.1" placeholder="e.g. 86" /></label>
-          <label>Waist (cm)<input type="number" id="waist_cm" step="0.1" placeholder="e.g. 68" /></label>
-          <label>Hip (cm)<input type="number" id="hip_cm" step="0.1" placeholder="e.g. 94" /></label>
-          <label>Inseam (cm)<input type="number" id="inseam_cm" step="0.1" placeholder="optional" /></label>
-          <label>Usual size<input type="text" id="usual_size" placeholder="e.g. US 4 / S" /></label>
-          <label>Monthly budget ($)<input type="number" id="monthly_budget_usd" step="1" placeholder="e.g. 400" /></label>
-          <label>Fit preference
-            <select id="fit_preference">
-              <option value="fitted">fitted</option>
-              <option value="regular">regular</option>
-              <option value="relaxed" selected>relaxed</option>
-              <option value="oversized">oversized</option>
-            </select>
-          </label>
-          <label>Kibbe body type
-            <select id="kibbe">
-              <option value="">— none —</option>
-              <option>Dramatic</option>
-              <option>Soft Dramatic</option>
-              <option>Flamboyant Natural</option>
-              <option>Natural</option>
-              <option>Soft Natural</option>
-              <option>Flamboyant Gamine</option>
-              <option>Gamine</option>
-              <option>Soft Gamine</option>
-              <option>Dramatic Classic</option>
-              <option>Classic</option>
-              <option>Soft Classic</option>
-              <option>Theatrical Romantic</option>
-              <option>Romantic</option>
-            </select>
-          </label>
-        </div>
-        <p class="hint">Blank fields stay unknown — fit/budget just score lower confidence, never guessed.</p>
-      </div>
-    </details>
     <p>
       <label>
         <input type="checkbox" id="cost-toggle" />
@@ -182,6 +131,12 @@
   </form>
 
   <div id="cost-panel" style="display:none"></div>
+
+  <div id="weights" style="display:none">
+    <span class="lbl">Re-weight ranking:</span>
+    <label>Vibe <input type="range" id="w-vibe" min="0" max="100" value="75" /><span class="val" id="w-vibe-v">75</span></label>
+    <label>Versatility <input type="range" id="w-vers" min="0" max="100" value="25" /><span class="val" id="w-vers-v">25</span></label>
+  </div>
 
   <p id="status"></p>
   <ul id="results"></ul>
@@ -244,135 +199,65 @@
     costToggle.addEventListener("change", () => {
       costPanel.style.display = costToggle.checked ? "block" : "none";
     });
-    // Open the profile section the first time ranking is enabled.
-    document.getElementById("rank").addEventListener("change", (e) => {
-      if (e.target.checked) document.getElementById("profile-details").open = true;
-    });
-
-    // Persist the profile in this browser only (localStorage — never sent to git
-    // or anywhere but the ranking request you trigger).
-    const PROFILE_KEY = "jacque_profile_v1";
-    const profileFieldIds = ["height_cm", "bust_cm", "waist_cm", "hip_cm",
-      "inseam_cm", "usual_size", "monthly_budget_usd", "fit_preference", "kibbe"];
-    // Persist the gender preference too (sent on every scoped search, not just ranking).
-    const persistIds = profileFieldIds.concat(["gender"]);
-
-    function loadProfile() {
-      let saved = {};
-      try { saved = JSON.parse(localStorage.getItem(PROFILE_KEY) || "{}"); } catch (e) {}
-      for (const id of persistIds) {
-        const el = document.getElementById(id);
-        if (el && saved[id] != null && saved[id] !== "") el.value = saved[id];
-      }
-    }
-    function saveProfile() {
-      const data = {};
-      for (const id of persistIds) {
-        const el = document.getElementById(id);
-        if (el) data[id] = el.value;
-      }
-      try { localStorage.setItem(PROFILE_KEY, JSON.stringify(data)); } catch (e) {}
-    }
-    loadProfile();
-    for (const id of persistIds) {
-      const el = document.getElementById(id);
-      if (el) el.addEventListener("change", saveProfile);
-    }
-
     renderCost();
 
-    // Text-assist step: send the image to Sonnet, fill the query box.
-    assistBtn.addEventListener("click", async () => {
-      const fileInput = document.getElementById("image");
-      if (!fileInput.files[0]) {
-        assistStatus.textContent = "Pick an image first.";
-        return;
-      }
-      assistStatus.textContent = "Asking Sonnet...";
-      assistDetail.textContent = "";
+    // Escape model-supplied text before inserting as HTML.
+    function esc(s) {
+      return String(s == null ? "" : s)
+        .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
 
-      const fd = new FormData();
-      fd.append("image", fileInput.files[0]);
-
-      let data;
-      try {
-        const resp = await fetch("/api/assist", { method: "POST", body: fd });
-        data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || "Request failed");
-      } catch (err) {
-        assistStatus.textContent = "Error: " + err.message;
-        return;
-      }
-
-      document.getElementById("query").value = data.query;
-      assistStatus.textContent = "Filled.";
+    // Show the Sonnet analysis: item attributes, versatility, and the queries used.
+    function renderAnalysis(a) {
+      if (!a) { assistDetail.innerHTML = ""; return; }
+      const it = a.item || {};
+      const vb = a.versatility_base || {};
+      const facts = [it.silhouette, it.color_family, it.pattern, it.formality]
+        .filter(Boolean).map(esc).join(" · ");
+      const tags = (it.aesthetic_tags || [])
+        .map((t) => "<span class='chip'>" + esc(t) + "</span>").join(" ");
+      const queries = (a.queries || [])
+        .map((q) => "<span class='chip q'>" + esc(q) + "</span>").join(" ");
+      const score = vb.score == null ? "—" : vb.score;
       assistDetail.innerHTML =
-        "<p><b>Items:</b> " + (data.items || "") + "</p>" +
-        "<p><b>Style:</b> " + (data.style || "") + "</p>";
-      recordCost(data.cost);
-    });
+        "<div class='analysis'>" +
+          "<div class='row'><b>" + esc(it.category || "item") + "</b>" +
+            (facts ? " · " + facts : "") + "</div>" +
+          (it.material_guess ? "<div class='row muted'>material: " + esc(it.material_guess) + "</div>" : "") +
+          (tags ? "<div class='row'>" + tags + "</div>" : "") +
+          "<div class='row'><b>Versatility " + score + "/100</b> — " + esc(vb.rationale || "") + "</div>" +
+          "<div class='row muted'>Searched (aggregated): " + queries + "</div>" +
+        "</div>";
+    }
 
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
+    // --- Rerank state + re-weighting ----------------------------------------
+    let lastProducts = [];  // products carrying per-dimension `score` objects
+    const weightsPanel = document.getElementById("weights");
+    const wVibe = document.getElementById("w-vibe");
+    const wVers = document.getElementById("w-vers");
+
+    // Weighted combine of the two dimensions (vibe dominant by default).
+    function combinedScore(s, w) {
+      if (!s) return -1;
+      const den = w.vibe + w.vers;
+      if (!den) return 0;
+      return Math.round((w.vibe * (s.vibe_match || 0) + w.vers * (s.versatility || 0)) / den);
+    }
+
+    function rankAndRender() {
+      document.getElementById("w-vibe-v").textContent = wVibe.value;
+      document.getElementById("w-vers-v").textContent = wVers.value;
+      const w = { vibe: +wVibe.value, vers: +wVers.value };
+      const ranked = lastProducts
+        .map((p) => ({ ...p, _combined: combinedScore(p.score, w) }))
+        .sort((a, b) => b._combined - a._combined);
+      renderProducts(ranked);
+    }
+    [wVibe, wVers].forEach((el) => el.addEventListener("input", rankAndRender));
+
+    // Render a product grid (shared by the image flow and the text-query form).
+    function renderProducts(products) {
       results.innerHTML = "";
-      statusEl.textContent = "Searching...";
-
-      const fileInput = document.getElementById("image");
-      const query = document.getElementById("query").value;
-
-      const scoped = document.getElementById("scoped").checked;
-      const wantRank = scoped && document.getElementById("rank").checked;
-      const endpoint = scoped ? "/api/search_scoped" : "/api/search";
-
-      if (!fileInput.files[0] && !query.trim()) {
-        statusEl.textContent = "Type a description or upload an image first.";
-        return;
-      }
-      if (!scoped && !fileInput.files[0]) {
-        statusEl.textContent =
-          "Channel3 search needs an image. Upload one, or check 'scoped sites' to search by description.";
-        return;
-      }
-
-      statusEl.textContent = wantRank ? "Searching + ranking..." : "Searching...";
-
-      const fd = new FormData();
-      if (fileInput.files[0]) fd.append("image", fileInput.files[0]);
-      if (query) fd.append("query", query);
-      const gender = document.getElementById("gender").value;
-      if (gender && scoped) fd.append("gender", gender);
-      if (wantRank) {
-        fd.append("rank", "1");
-        saveProfile(); // remember this browser's profile for next time
-        // Forward the profile fields; blanks are simply omitted.
-        for (const id of profileFieldIds) {
-          const v = document.getElementById(id).value.trim();
-          if (v) fd.append(id, v);
-        }
-      }
-
-      let data;
-      try {
-        const resp = await fetch(endpoint, { method: "POST", body: fd });
-        data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || "Request failed");
-      } catch (err) {
-        statusEl.textContent = "Error: " + err.message;
-        return;
-      }
-
-      recordCost(data.cost);
-      if (data.rank_cost) recordCost(data.rank_cost);
-
-      const products = data.products || [];
-      if (products.length === 0) {
-        statusEl.textContent = "No products found.";
-        return;
-      }
-
-      const ranked = products.some((p) => p.ranking);
-      statusEl.textContent =
-        products.length + " result(s)" + (ranked ? ", ranked for your profile:" : ":");
       for (const p of products) {
         const li = document.createElement("li");
         li.className = "card";
@@ -382,7 +267,6 @@
         link.target = "_blank";
         link.rel = "noopener";
 
-        // Image box, fixed aspect ratio. Lazy + async decode for efficiency.
         const thumb = document.createElement("div");
         thumb.className = "thumb";
         if (p.image) {
@@ -391,7 +275,6 @@
           img.decoding = "async";
           img.src = p.image;
           img.alt = p.title || "";
-          // If the image 404s or is blocked, fall back to the placeholder.
           img.addEventListener("error", () => {
             thumb.classList.add("placeholder");
             img.remove();
@@ -400,18 +283,12 @@
         } else {
           thumb.classList.add("placeholder");
         }
-        // Overall score badge (top-left of the thumbnail) when ranked.
-        if (p.ranking) {
+        // Combined (re-weighted) score badge, when reranked.
+        if (p._combined != null && p._combined >= 0) {
           const badge = document.createElement("div");
-          if (p.ranking.overall == null) {
-            badge.className = "score-badge unscored";
-            badge.textContent = "—";
-            badge.title = "No usable signal to score this item";
-          } else {
-            badge.className = "score-badge";
-            badge.textContent = Math.round(p.ranking.overall * 100);
-            badge.title = "Overall match score";
-          }
+          badge.className = "score-badge";
+          badge.textContent = p._combined;
+          badge.title = "Combined score — re-weight with the sliders above";
           thumb.appendChild(badge);
         }
         link.appendChild(thumb);
@@ -439,41 +316,139 @@
           body.appendChild(domain);
         }
 
-        // Sub-score chips: target · fit · taste · budget.
-        if (p.ranking) {
-          const order = ["target_match", "fit", "taste", "budget"];
-          const labels = { target_match: "target", fit: "fit", taste: "taste", budget: "budget" };
-          const chips = document.createElement("div");
-          chips.className = "subscores";
-          for (const key of order) {
-            const s = p.ranking.subscores[key];
-            const chip = document.createElement("span");
-            chip.className = "chip";
-            if (!s || s.value == null || s.confidence <= 0) {
-              chip.classList.add("dim");
-              chip.innerHTML = labels[key] + " <span class='v'>n/a</span>";
-              chip.title = (s && s.reason) || "missing data";
-            } else {
-              // Tint green→red by value; fade by confidence.
-              const hue = Math.round(s.value * 120); // 0=red, 120=green
-              chip.style.background = `hsl(${hue} 65% 92%)`;
-              chip.style.opacity = (0.45 + 0.55 * s.confidence).toFixed(2);
-              chip.innerHTML =
-                labels[key] + " <span class='v'>" + Math.round(s.value * 100) + "</span>";
-              chip.title =
-                `${labels[key]}: ${Math.round(s.value * 100)} (confidence ${Math.round(
-                  s.confidence * 100
-                )}%) — ${s.reason || ""}`;
+        // Per-dimension scores + glanceable verdict notes (❤️ / 💔 / ❓).
+        if (p.score) {
+          const s = p.score;
+          const sub = document.createElement("div");
+          sub.className = "subscores";
+          sub.innerHTML =
+            "<span>vibe " + (s.vibe_match ?? "—") + "</span>" +
+            "<span>versatility " + (s.versatility ?? "—") + "</span>";
+          body.appendChild(sub);
+
+          const notes = s.notes || [];
+          if (notes.length) {
+            const ul = document.createElement("ul");
+            ul.className = "notes";
+            const icon = { heart: "❤️", heartbreak: "💔", question: "❓" };
+            for (const n of notes) {
+              const li = document.createElement("li");
+              li.textContent = (icon[n.verdict] || "•") + " " + (n.text || "");
+              ul.appendChild(li);
             }
-            chips.appendChild(chip);
+            body.appendChild(ul);
           }
-          body.appendChild(chips);
+        }
+
+        // Provenance: how many of the analysis queries surfaced this item.
+        const matches = (p.matched_queries || []).length;
+        if (matches > 1) {
+          const m = document.createElement("div");
+          m.className = "card-matches";
+          m.textContent = "matched " + matches + " queries";
+          body.appendChild(m);
         }
 
         link.appendChild(body);
         li.appendChild(link);
         results.appendChild(li);
       }
+    }
+
+    // Image flow: one Sonnet call analyzes the item, then its queries are
+    // searched on Google Shopping and aggregated (ready for reranking).
+    assistBtn.addEventListener("click", async () => {
+      const fileInput = document.getElementById("image");
+      if (!fileInput.files[0]) {
+        assistStatus.textContent = "Pick an image first.";
+        return;
+      }
+      assistStatus.textContent = "Analyzing image + searching…";
+      assistDetail.innerHTML = "";
+      results.innerHTML = "";
+      statusEl.textContent = "";
+
+      const fd = new FormData();
+      fd.append("image", fileInput.files[0]);
+      const minP = document.getElementById("min_price").value.trim();
+      const maxP = document.getElementById("max_price").value.trim();
+      if (minP) fd.append("min_price", minP);
+      if (maxP) fd.append("max_price", maxP);
+
+      let data;
+      try {
+        const resp = await fetch("/api/discover", { method: "POST", body: fd });
+        data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Request failed");
+      } catch (err) {
+        assistStatus.textContent = "Error: " + err.message;
+        return;
+      }
+
+      (data.costs || []).forEach(recordCost);
+      renderAnalysis(data.analysis);
+      lastProducts = data.products || [];
+      assistStatus.textContent = "Done.";
+      statusEl.textContent = lastProducts.length
+        ? lastProducts.length + " result(s), ranked by vibe — re-weight below:"
+        : "No products found.";
+      weightsPanel.style.display = lastProducts.length ? "flex" : "none";
+      rankAndRender();
+    });
+
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      results.innerHTML = "";
+      statusEl.textContent = "Searching...";
+
+      const fileInput = document.getElementById("image");
+      const query = document.getElementById("query").value;
+
+      const scoped = document.getElementById("scoped").checked;
+      const endpoint = scoped ? "/api/search_scoped" : "/api/search";
+
+      if (!fileInput.files[0] && !query.trim()) {
+        statusEl.textContent = "Type a description or upload an image first.";
+        return;
+      }
+      if (!scoped && !fileInput.files[0]) {
+        statusEl.textContent =
+          "Channel3 search needs an image. Upload one, or check 'Google Shopping' to search by description.";
+        return;
+      }
+
+      const fd = new FormData();
+      if (fileInput.files[0]) fd.append("image", fileInput.files[0]);
+      if (query) fd.append("query", query);
+      if (scoped) {
+        const minP = document.getElementById("min_price").value.trim();
+        const maxP = document.getElementById("max_price").value.trim();
+        if (minP) fd.append("min_price", minP);
+        if (maxP) fd.append("max_price", maxP);
+      }
+
+      let data;
+      try {
+        const resp = await fetch(endpoint, { method: "POST", body: fd });
+        data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || "Request failed");
+      } catch (err) {
+        statusEl.textContent = "Error: " + err.message;
+        return;
+      }
+
+      recordCost(data.cost);
+
+      const products = data.products || [];
+      if (products.length === 0) {
+        statusEl.textContent = "No products found.";
+        return;
+      }
+
+      statusEl.textContent = products.length + " result(s):";
+      lastProducts = [];
+      weightsPanel.style.display = "none";
+      renderProducts(products);
     });
   </script>
 </body>
