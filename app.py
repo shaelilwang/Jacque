@@ -230,14 +230,31 @@ def search_scoped():
         except Exception as e:
             return jsonify({"error": f"Ranking failed: {e}"}), 502
 
+        # Optional: write a grounded personal-shopper note for each top pick
+        # (one extra Haiku call per item; only the scored items are worth it).
+        expl_by_id, explain_cost = {}, None
+        if request.form.get("explain"):
+            try:
+                from explain import explain_items
+
+                scored = [it for it in ranked if it.overall is not None]
+                explanations, explain_cost = explain_items(scored, profile=profile)
+                expl_by_id = {e.item_id: e for e in explanations}
+            except Exception as e:
+                return jsonify({"error": f"Explanation failed: {e}"}), 502
+
         by_url = {p.get("url", ""): p for p in products}
         norm = []
         for item in ranked:
             base = _shape(by_url.get(item.garment.url, {"title": item.garment.title,
                                                         "url": item.garment.url}))
             base["ranking"] = _serialize_ranking(item)
+            base["explanation"] = _serialize_explanation(expl_by_id.get(item.garment.url))
             norm.append(base)
-        return jsonify({"products": norm, "cost": cost, "rank_cost": rank_cost})
+        payload = {"products": norm, "cost": cost, "rank_cost": rank_cost}
+        if explain_cost is not None:
+            payload["explain_cost"] = explain_cost
+        return jsonify(payload)
 
     return jsonify({"products": [_shape(p) for p in products], "cost": cost})
 
@@ -249,7 +266,6 @@ def _profile_from_form(form):
     """
     from profiles import (
         DEFAULT_TASTE,
-        FitPreference,
         KibbeType,
         Measurements,
         UserProfile,
@@ -265,11 +281,6 @@ def _profile_from_form(form):
     def text(key):
         return (form.get(key) or "").strip() or None
 
-    try:
-        fit = FitPreference(form.get("fit_preference") or "regular")
-    except ValueError:
-        fit = FitPreference.REGULAR
-
     kibbe = None
     if form.get("kibbe"):
         try:
@@ -279,7 +290,6 @@ def _profile_from_form(form):
 
     return UserProfile(
         taste=DEFAULT_TASTE,
-        fit_preference=fit,
         monthly_budget_usd=num("monthly_budget_usd"),
         usual_size=text("usual_size"),
         measurements=Measurements(
@@ -301,6 +311,18 @@ def _serialize_ranking(item):
             name: {"value": s.value, "confidence": s.confidence, "reason": s.reason}
             for name, s in item.subscores.items()
         },
+    }
+
+
+def _serialize_explanation(explanation):
+    """JSON-friendly explanation payload, or None when not generated."""
+    if explanation is None:
+        return None
+    return {
+        "explanation": explanation.explanation,
+        "confidence_note": explanation.confidence_note,
+        "lead_reason": explanation.lead_reason,
+        "flags": list(explanation.flags),
     }
 
 

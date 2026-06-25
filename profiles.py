@@ -30,13 +30,6 @@ class KibbeType(str, Enum):
     ROMANTIC = "Romantic"
 
 
-class FitPreference(str, Enum):
-    FITTED = "fitted"
-    REGULAR = "regular"
-    RELAXED = "relaxed"
-    OVERSIZED = "oversized"
-
-
 @dataclass(frozen=True)
 class Measurements:
     """Body measurements in centimetres. `None` = not provided (never guessed)."""
@@ -54,7 +47,6 @@ class UserProfile:
     """Who we're shopping for. `taste` is a tuple of aesthetic descriptors."""
 
     taste: Tuple[str, ...]
-    fit_preference: FitPreference = FitPreference.REGULAR
     monthly_budget_usd: Optional[float] = None
     usual_size: Optional[str] = None
     measurements: Measurements = field(default_factory=Measurements)
@@ -75,7 +67,6 @@ DEFAULT_TASTE: Tuple[str, ...] = (
 # runnable. Replace them with your real values, or set to None to keep honest.
 DEFAULT_PROFILE = UserProfile(
     taste=DEFAULT_TASTE,
-    fit_preference=FitPreference.RELAXED,
     monthly_budget_usd=400.0,
     usual_size="US 4 / S",
     measurements=Measurements(height_cm=170.0, bust_cm=86.0, waist_cm=68.0, hip_cm=94.0),

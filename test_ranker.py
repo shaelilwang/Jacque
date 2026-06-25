@@ -6,7 +6,7 @@ Pure functions only — no network, no LLM. Run with:  .venv/bin/python -m pytes
 
 from __future__ import annotations
 
-from profiles import FitPreference, KibbeType, Measurements, UserProfile
+from profiles import KibbeType, Measurements, UserProfile
 from ranker import (
     DEFAULT_WEIGHTS,
     Garment,
@@ -24,7 +24,6 @@ from ranker import (
 
 PROFILE = UserProfile(
     taste=("sculptural", "androgynous", "editorial"),
-    fit_preference=FitPreference.RELAXED,
     monthly_budget_usd=300.0,
     measurements=Measurements(bust_cm=86.0, waist_cm=68.0, hip_cm=94.0),
     kibbe=KibbeType.DRAMATIC,
@@ -107,9 +106,9 @@ def test_fit_silhouette_avoided():
 
 
 def test_fit_uses_dimensions_when_present():
-    # Relaxed ease = 14cm; bust 86 -> ideal chest ~100. Exact match -> high score.
+    # Default ease = 7cm; bust 86 -> ideal chest ~93. Exact match -> high score.
     g = _g(silhouette=("structured",), attribute_confidence=0.9,
-           dimensions=GarmentDimensions(chest_cm=100.0), dimensions_confidence=0.9)
+           dimensions=GarmentDimensions(chest_cm=93.0), dimensions_confidence=0.9)
     assert score_fit(g, PROFILE).value > 0.8
 
 

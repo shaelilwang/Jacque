@@ -19,7 +19,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, Mapping, Optional, Sequence, Set, Tuple
 
-from profiles import FitPreference, KibbeType, UserProfile
+from profiles import KibbeType, UserProfile
 
 
 # --------------------------------------------------------------------------- #
@@ -214,13 +214,9 @@ SILHOUETTE_VOCAB: Tuple[str, ...] = tuple(
     sorted({t for lines in KIBBE_LINES.values() for t in lines["favor"] | lines["avoid"]})
 )
 
-# Ease (cm) we expect a garment to add over the body, per fit preference.
-FIT_EASE_CM: Dict[FitPreference, float] = {
-    FitPreference.FITTED: 2.0,
-    FitPreference.REGULAR: 7.0,
-    FitPreference.RELAXED: 14.0,
-    FitPreference.OVERSIZED: 24.0,
-}
+# Ease (cm) we expect a garment to add over the body. A single regular-fit
+# assumption — fit preference was removed from the system.
+DEFAULT_EASE_CM = 7.0
 # How far (cm) from the ideal eased measurement drives the dimensional score to 0.
 FIT_TOLERANCE_CM = 16.0
 
@@ -290,7 +286,7 @@ def _silhouette_fit(g: Garment, profile: UserProfile) -> SubScore:
 def _dimensional_fit(g: Garment, profile: UserProfile) -> SubScore:
     """Closeness of actual garment dims to the body + expected ease."""
     body = profile.measurements
-    ease = FIT_EASE_CM.get(profile.fit_preference, 7.0)
+    ease = DEFAULT_EASE_CM
     comparables = (
         (g.dimensions.chest_cm, body.bust_cm),
         (g.dimensions.waist_cm, body.waist_cm),
@@ -302,7 +298,7 @@ def _dimensional_fit(g: Garment, profile: UserProfile) -> SubScore:
     avg = sum(diffs) / len(diffs)
     value = _clamp01(1.0 - avg / FIT_TOLERANCE_CM)
     return SubScore(value, _clamp01(g.dimensions_confidence),
-                    f"avg {avg:.0f}cm from ideal ({profile.fit_preference.value})")
+                    f"avg {avg:.0f}cm from ideal fit")
 
 
 def score_fit(g: Garment, profile: UserProfile) -> SubScore:

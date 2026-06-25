@@ -86,6 +86,22 @@
     }
     .card-price { font-size: 14px; font-weight: 600; }
     .card-domain { font-size: 12px; color: #888; margin-top: auto; }
+
+    /* Personal-shopper explanation block. */
+    .explain {
+      margin-top: 8px; padding-top: 8px; border-top: 1px solid #f0f0f0;
+      font-size: 12.5px; line-height: 1.45; color: #2a2a2a;
+    }
+    .lead-tag {
+      display: inline-block; font-size: 10px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .04em; color: #44485e;
+      background: #eceefb; border-radius: 4px; padding: 1px 6px; margin-bottom: 5px;
+    }
+    .explain-note { margin-top: 5px; font-size: 11.5px; font-style: italic; color: #777; }
+    .explain-flag {
+      margin-top: 5px; font-size: 11px; font-weight: 600; color: #b3261e;
+      cursor: help;
+    }
   </style>
 </head>
 <body>
@@ -129,6 +145,12 @@
         Rank for my profile (taste · fit/Kibbe · budget) — uses Haiku, scoped only
       </label>
     </p>
+    <p>
+      <label>
+        <input type="checkbox" id="explain" />
+        Explain top picks — a grounded personal-shopper note per item (extra Haiku call each; needs ranking)
+      </label>
+    </p>
     <details id="profile-details">
       <summary>Your profile (used when ranking)</summary>
       <div id="profile-form">
@@ -142,14 +164,6 @@
           <label>Inseam (cm)<input type="number" id="inseam_cm" step="0.1" placeholder="optional" /></label>
           <label>Usual size<input type="text" id="usual_size" placeholder="e.g. US 4 / S" /></label>
           <label>Monthly budget ($)<input type="number" id="monthly_budget_usd" step="1" placeholder="e.g. 400" /></label>
-          <label>Fit preference
-            <select id="fit_preference">
-              <option value="fitted">fitted</option>
-              <option value="regular">regular</option>
-              <option value="relaxed" selected>relaxed</option>
-              <option value="oversized">oversized</option>
-            </select>
-          </label>
           <label>Kibbe body type
             <select id="kibbe">
               <option value="">— none —</option>
@@ -248,12 +262,25 @@
     document.getElementById("rank").addEventListener("change", (e) => {
       if (e.target.checked) document.getElementById("profile-details").open = true;
     });
+    // Explanations are built from ranking output, so turning them on turns
+    // ranking on too (and unchecking ranking unchecks explanations).
+    const rankBox = document.getElementById("rank");
+    const explainBox = document.getElementById("explain");
+    explainBox.addEventListener("change", (e) => {
+      if (e.target.checked) {
+        rankBox.checked = true;
+        document.getElementById("profile-details").open = true;
+      }
+    });
+    rankBox.addEventListener("change", (e) => {
+      if (!e.target.checked) explainBox.checked = false;
+    });
 
     // Persist the profile in this browser only (localStorage — never sent to git
     // or anywhere but the ranking request you trigger).
     const PROFILE_KEY = "jacque_profile_v1";
     const profileFieldIds = ["height_cm", "bust_cm", "waist_cm", "hip_cm",
-      "inseam_cm", "usual_size", "monthly_budget_usd", "fit_preference", "kibbe"];
+      "inseam_cm", "usual_size", "monthly_budget_usd", "kibbe"];
     // Persist the gender preference too (sent on every scoped search, not just ranking).
     const persistIds = profileFieldIds.concat(["gender"]);
 
@@ -322,6 +349,7 @@
 
       const scoped = document.getElementById("scoped").checked;
       const wantRank = scoped && document.getElementById("rank").checked;
+      const wantExplain = wantRank && document.getElementById("explain").checked;
       const endpoint = scoped ? "/api/search_scoped" : "/api/search";
 
       if (!fileInput.files[0] && !query.trim()) {
@@ -343,6 +371,7 @@
       if (gender && scoped) fd.append("gender", gender);
       if (wantRank) {
         fd.append("rank", "1");
+        if (wantExplain) fd.append("explain", "1");
         saveProfile(); // remember this browser's profile for next time
         // Forward the profile fields; blanks are simply omitted.
         for (const id of profileFieldIds) {
@@ -363,6 +392,7 @@
 
       recordCost(data.cost);
       if (data.rank_cost) recordCost(data.rank_cost);
+      if (data.explain_cost) recordCost(data.explain_cost);
 
       const products = data.products || [];
       if (products.length === 0) {
@@ -468,6 +498,43 @@
             chips.appendChild(chip);
           }
           body.appendChild(chips);
+        }
+
+        // Personal-shopper explanation (grounded note for the top picks).
+        if (p.explanation) {
+          const ex = p.explanation;
+          const block = document.createElement("div");
+          block.className = "explain";
+
+          if (ex.lead_reason) {
+            const tag = document.createElement("span");
+            tag.className = "lead-tag";
+            tag.textContent = "why · " + ex.lead_reason.replace("_", " ");
+            block.appendChild(tag);
+          }
+
+          const text = document.createElement("div");
+          text.textContent = ex.explanation || "";
+          block.appendChild(text);
+
+          if (ex.confidence_note) {
+            const note = document.createElement("div");
+            note.className = "explain-note";
+            note.textContent = ex.confidence_note;
+            block.appendChild(note);
+          }
+
+          // Grounding guard: surface any claim the evidence didn't support.
+          if (ex.flags && ex.flags.length) {
+            const flag = document.createElement("div");
+            flag.className = "explain-flag";
+            flag.textContent = "⚠ " + ex.flags.length +
+              " claim(s) flagged for review";
+            flag.title = ex.flags.join("\n");
+            block.appendChild(flag);
+          }
+
+          body.appendChild(block);
         }
 
         link.appendChild(body);
