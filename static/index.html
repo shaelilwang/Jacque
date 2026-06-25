@@ -17,6 +17,8 @@
     h1 {
       text-align: center; font-size: 44px; font-weight: 700;
       letter-spacing: .04em; margin: 8px 0 40px;
+      font-family: Garamond, "EB Garamond", "Adobe Garamond Pro", "Apple Garamond",
+                   Baskerville, "Times New Roman", serif;
     }
     .cost-link {
       position: absolute; top: 0; right: 0;
@@ -46,14 +48,14 @@
       transition: transform .6s cubic-bezier(.4, 0, .2, 1);
     }
     /* On Go: the whole first column slides left to make room for the analysis. */
-    #stage.active .hero { transform: translateX(-32vw); }
+    #stage.active .hero { transform: translateX(-39vw); }
     /* Plain text (no button chrome), set in Garamond. Still a label that opens
        the file picker on click. */
     .want {
       cursor: pointer; color: var(--ink);
       font-family: Garamond, "EB Garamond", "Adobe Garamond Pro", "Apple Garamond",
                    Baskerville, "Times New Roman", serif;
-      font-size: 32px; font-weight: 500; letter-spacing: .01em;
+      font-size: 16px; font-weight: 500; letter-spacing: .01em;
     }
     .want:hover { text-decoration: underline; text-underline-offset: 5px; }
     .want:focus-visible { outline: 2px solid var(--ink); outline-offset: 4px; }
@@ -66,9 +68,9 @@
 
     /* Analysis block: appears centre-stage on Go and types out Sonnet's read. */
     .analysis-stage {
-      position: absolute; left: 50%; top: 50%;
+      position: absolute; left: 36%; top: 50%;
       transform: translate(-50%, -50%) scale(.96);
-      width: min(520px, 46vw); max-height: 76vh; overflow: auto;
+      width: min(340px, 28vw); max-height: 80vh; overflow: auto;
       opacity: 0; pointer-events: none;
       transition: opacity .5s ease, transform .5s ease;
     }
@@ -82,35 +84,35 @@
     }
     .typed.typing::after { content: "▋"; margin-left: 1px; animation: blink 1s steps(1) infinite; }
     @keyframes blink { 50% { opacity: 0; } }
-    /* Budget + search live in the first column, bottom-left; fade in after typing. */
-    /* Anchored just below the hero content, left-aligned with "Drop a garment". */
+    /* Budget + search sit below the typed read with a big gap; fade in after typing. */
     .search-controls {
-      position: absolute; left: 0; top: calc(100% + 20px);
+      margin-top: 52px;
       display: flex; flex-direction: column; align-items: flex-start; gap: 18px;
       opacity: 0; pointer-events: none; transition: opacity .6s ease;
     }
     .search-controls.show { opacity: 1; pointer-events: auto; }
-    .searching-block { margin-top: 22px; color: var(--muted); }
+    .searching-block { margin: 0; color: var(--muted); }   /* below the search button */
 
-    @media (max-width: 860px) {
-      #stage { flex-direction: column; }
+    @media (max-width: 980px) {
+      #stage { flex-direction: column; align-items: stretch; }
       #stage.active .hero { transform: none; }
       .analysis-stage {
         position: static; transform: none; width: 100%; max-width: 520px;
-        max-height: none; margin-top: 24px;
+        max-height: none; margin: 24px 0;
       }
       #stage.active .analysis-stage { transform: none; }
+      .results-col { position: static; width: 100%; }
     }
 
     /* ---- dual-thumb price range: two numbers on top, no labels ---- */
     /* Budget: label, a line with two circles, then the selected $range below. */
-    .range { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
+    .range { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; width: 100%; }
     .budget-label, .budget-range {
       font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
       font-size: 12px; color: var(--ink); font-variant-numeric: tabular-nums;
     }
     .budget-label { color: var(--muted); }
-    .range .track { position: relative; width: 280px; height: 22px; }
+    .range .track { position: relative; width: min(280px, 100%); height: 22px; }
     .range .rail, .range .fill { position: absolute; top: 10px; height: 1px; border-radius: 1px; }
     .range .rail { left: 0; right: 0; background: #ccc; }
     .range .fill { background: var(--ink); }
@@ -118,15 +120,20 @@
       position: absolute; left: 0; top: 0; width: 100%; height: 22px; margin: 0;
       -webkit-appearance: none; appearance: none; background: none; pointer-events: none;
     }
-    /* Filled circles, centered on the line. */
+    /* Tiny 2px dots, centered on the line. The transparent border just keeps the
+       grab area usable — the visible dot is 2px (background-clip: padding-box). */
     .range input[type=range]::-webkit-slider-thumb {
       -webkit-appearance: none; appearance: none; pointer-events: auto;
-      width: 13px; height: 13px; border-radius: 50%; background: var(--ink);
-      border: none; cursor: pointer;
+      box-sizing: content-box;
+      width: 2px; height: 2px; border-radius: 50%;
+      background: var(--ink); background-clip: padding-box;
+      border: 8px solid transparent; cursor: pointer;
     }
     .range input[type=range]::-moz-range-thumb {
-      pointer-events: auto; width: 13px; height: 13px; border-radius: 50%;
-      background: var(--ink); border: none; cursor: pointer;
+      box-sizing: content-box;
+      width: 2px; height: 2px; border-radius: 50%;
+      background: var(--ink); background-clip: padding-box;
+      border: 8px solid transparent; cursor: pointer;
     }
     .range input[type=range]::-webkit-slider-runnable-track { background: none; height: 22px; }
     .range input[type=range]::-moz-range-track { background: none; height: 2px; }
@@ -146,64 +153,39 @@
       font-size: 12px; color: var(--muted); min-height: 1.1em;
     }
 
-    /* ---- analysis panel ---- */
-    .analysis {
-      border: 1px solid var(--hair); border-radius: 10px; background: #fafafa;
-      padding: 12px 14px; margin: 24px auto 8px; max-width: 640px;
+    /* ---- products: rightmost column, two sections, 2 per row, editorial ---- */
+    .results-col {
+      position: absolute; top: 0; right: 0; bottom: 0;
+      width: 40vw; overflow-y: auto;
+      display: flex; flex-direction: column; gap: 36px;
+      opacity: 0; pointer-events: none; transition: opacity .5s ease;
     }
-    .analysis .row { font-size: 14px; margin: 4px 0; }
-    .analysis .row.muted { color: var(--muted); font-size: 13px; }
-    .chip {
-      display: inline-block; font-size: 12px; padding: 2px 8px; margin: 2px 3px 2px 0;
-      border-radius: 999px; background: #ececf3; color: #444;
+    .results-col.show { opacity: 1; pointer-events: auto; }
+    .group-title {
+      font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12px; font-weight: 500; letter-spacing: .05em; color: var(--muted);
+      margin: 0 0 16px;
     }
-    .chip.q { background: #e7f0ff; color: #245; font-family: ui-monospace, monospace; }
-
-    /* ---- re-weight controls ---- */
-    #weights {
-      border: 1px solid var(--hair); border-radius: 10px; padding: 12px 14px; margin: 12px auto;
-      max-width: 660px; display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: center;
+    .grid {
+      list-style: none; padding: 0; margin: 0;
+      display: grid; grid-template-columns: 1fr 1fr; gap: 24px 16px;
     }
-    #weights .lbl { font-weight: 600; font-size: 13px; }
-    #weights label { font-size: 13px; display: flex; align-items: center; gap: 6px; }
-    #weights input[type=range] { width: 110px; }
-    #weights .val { font-variant-numeric: tabular-nums; color: #666; width: 2.2em; text-align: right; }
-
-    #status { text-align: center; }
-
-    /* ---- responsive product grid ---- */
-    #results {
-      list-style: none; padding: 0; margin: 16px 0;
-      display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 18px;
-    }
-    .card {
-      display: flex; flex-direction: column; border: 1px solid var(--hair);
-      border-radius: 10px; overflow: hidden; background: #fff;
-      transition: box-shadow .15s ease, transform .15s ease;
-    }
-    .card:hover { box-shadow: 0 4px 16px rgba(0,0,0,.10); transform: translateY(-2px); }
-    .card a { text-decoration: none; color: inherit; display: flex; flex-direction: column; height: 100%; }
+    .card a { text-decoration: none; color: inherit; display: block; }
     .thumb {
-      position: relative; aspect-ratio: 3 / 4; background: #f4f4f4;
-      display: flex; align-items: center; justify-content: center; overflow: hidden;
+      aspect-ratio: 3 / 4; background: #f4f4f4; overflow: hidden;
+      display: flex; align-items: center; justify-content: center;
     }
     .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-    .thumb.placeholder::after { content: "No image"; color: #aaa; font-size: 13px; }
-    .score-badge {
-      position: absolute; top: 8px; left: 8px; background: rgba(17,17,17,.88);
-      color: #fff; font-size: 12px; font-weight: 700; padding: 4px 7px; border-radius: 6px;
+    .thumb.placeholder::after {
+      content: "no image"; color: #bbb; font-size: 12px;
+      font-family: "IBM Plex Mono", ui-monospace, monospace;
     }
-    .card-body { padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; }
-    .card-title {
-      font-size: 14px; line-height: 1.3; font-weight: 500;
-      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    /* All product meta one consistent size, IBM Plex Mono. */
+    .meta {
+      font-family: "IBM Plex Mono", ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 12px; line-height: 1.5; color: var(--ink); margin-top: 10px;
     }
-    .card-price { font-size: 14px; font-weight: 600; }
-    .card-domain { font-size: 12px; color: #888; margin-top: auto; }
-    .card-matches { font-size: 11px; color: #aaa; }
-    .subscores { font-size: 11px; color: #555; display: flex; flex-wrap: wrap; gap: 8px; }
-    .notes { list-style: none; margin: 6px 0 0; padding: 0; font-size: 12.5px; line-height: 1.4; color: #2a2a2a; }
-    .notes li { margin: 2px 0; }
+    .meta .m-match { color: var(--muted); }
   </style>
 </head>
 <body>
@@ -218,8 +200,12 @@
       <input type="file" id="image" accept="image/*" hidden />
       <img id="preview" class="preview" alt="Your uploaded image" hidden />
       <label for="image" class="want">Drop a garment</label>
+    </main>
 
-      <!-- Same column, left-aligned under the label; fades in after the read. -->
+    <div id="analysis-stage" class="analysis-stage">
+      <pre id="typed" class="typed"></pre>
+
+      <!-- Below the read, with a big gap; fades in after typing finishes. -->
       <div id="search-controls" class="search-controls">
         <div class="range" aria-label="Budget">
           <div class="budget-label">budget</div>
@@ -232,38 +218,60 @@
           <div class="budget-range" id="p-range">$0-$1000+</div>
         </div>
         <button type="button" id="go" class="go">search →</button>
+        <pre id="searching" class="typed searching-block" hidden></pre>
         <div id="go-status" class="go-status"></div>
       </div>
-    </main>
-
-    <div id="analysis-stage" class="analysis-stage">
-      <pre id="typed" class="typed"></pre>
-      <pre id="searching" class="typed searching-block" hidden></pre>
     </div>
-  </div>
 
-  <div id="weights" style="display:none">
-    <span class="lbl">Re-weight ranking:</span>
-    <label>Vibe <input type="range" id="w-vibe" min="0" max="100" value="75" /><span class="val" id="w-vibe-v">75</span></label>
-    <label>Versatility <input type="range" id="w-vers" min="0" max="100" value="25" /><span class="val" id="w-vers-v">25</span></label>
+    <!-- Rightmost column: results in two sections, fades in after search. -->
+    <div id="results-col" class="results-col"></div>
   </div>
-
-  <p id="status"></p>
-  <ul id="results"></ul>
 
   <script>
-    const statusEl = document.getElementById("status");
-    const results = document.getElementById("results");
     const goBtn = document.getElementById("go");
     const goStatus = document.getElementById("go-status");
     const stage = document.getElementById("stage");
     const typedEl = document.getElementById("typed");
     const searchControls = document.getElementById("search-controls");
     const searchingEl = document.getElementById("searching");
+    const resultsCol = document.getElementById("results-col");
     const imageInput = document.getElementById("image");
     const costToggle = document.getElementById("cost-toggle");
     const costPanel = document.getElementById("cost-panel");
     let currentAnalysis = null;   // set by analyzeImage(); consumed by Go
+
+    // --- Mock mode: add ?mock to the URL to view the UI without LLM/search calls ---
+    const MOCK = location.search.includes("mock");
+    const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+    const MOCK_ANALYSIS = {
+      item: {
+        category: "crop top", silhouette: "asymmetric, body-skimming", color_family: "black",
+        pattern: "solid", material_guess: "stretch jersey", formality: "smart casual",
+        aesthetic_tags: ["90s minimalism", "sleek", "going-out"],
+      },
+      queries: ["black asymmetric crop top", "sleek going-out jersey top",
+                "90s minimalist black top", "one shoulder stretch crop"],
+      display: {
+        category: "crop top", color: "black", material: "stretch jersey",
+        lines: ["asymmetric", "body-skimming", "90s minimalism"],
+        occasions: ["evening", "gallery", "city"],
+      },
+    };
+    const MOCK_PRODUCTS = [
+      ["Asymmetric jersey top", "COS", "$59", "jacque1", 90, 72],
+      ["One-shoulder crop", "Aritzia", "$45", "jacque2", 86, 61],
+      ["Ruched going-out top", "Reformation", "$98", "jacque3", 83, 55],
+      ["Slinky black tank", "Mango", "$29", "jacque4", 80, 79],
+      ["Draped asym top", "& Other Stories", "$65", "jacque5", 77, 63],
+      ["90s mesh top", "Urban Outfitters", "$34", "jacque6", 74, 58],
+      ["Cap-sleeve crop", "Zara", "$25", "jacque7", 70, 66],
+      ["Halter knit top", "Nordstrom", "$72", "jacque8", 66, 64],
+    ].map(([title, brand, price, seed, vibe, vers]) => ({
+      title, brand, price, domain: brand, url: "#",
+      image: "https://picsum.photos/seed/" + seed + "/400/520",
+      matched_queries: ["mock"],
+      score: { vibe_match: vibe, versatility: vers, notes: [] },
+    }));
 
     // Uploading an image immediately previews it and reads it with Sonnet.
     const preview = document.getElementById("preview");
@@ -284,11 +292,19 @@
       currentAnalysis = null;
       searchControls.classList.remove("show");
       stopSearching();
-      results.innerHTML = "";
-      statusEl.textContent = "";
-      weightsPanel.style.display = "none";
+      resultsCol.classList.remove("show");
+      resultsCol.innerHTML = "";
       stage.classList.add("active");
       typeText(typedEl, "reading...");
+
+      if (MOCK) {
+        await sleep(500);
+        currentAnalysis = MOCK_ANALYSIS;
+        typeSegments(typedEl, analysisSegments(currentAnalysis), {
+          done: () => { searchControls.classList.add("show"); },
+        });
+        return;
+      }
 
       const fd = new FormData();
       fd.append("image", f);
@@ -428,9 +444,10 @@
       })();
     }
 
-    // Editorial-shorthand read, split into segments (typed with pauses between).
+    // Editorial-shorthand read (display only), split into segments. The precise
+    // `item` is preserved for the reranker/queries — just not shown.
     function analysisSegments(a) {
-      const it = (a && a.item) || {};
+      const it = (a && a.display) || {};
       const segs = ["reading..."];
       if (it.category) segs.push(it.category);
       const cm = [it.color, it.material].filter(Boolean);
@@ -461,121 +478,81 @@
       searchingEl.hidden = true;     // disappears when done searching
     }
 
-    // ---- Rerank state + re-weighting ---------------------------------------
+    // ---- Ranking + results (two sections in the right column) --------------
     let lastProducts = [];
-    const weightsPanel = document.getElementById("weights");
-    const wVibe = document.getElementById("w-vibe");
-    const wVers = document.getElementById("w-vers");
 
-    function combinedScore(s, w) {
-      if (!s) return -1;
-      const den = w.vibe + w.vers;
-      if (!den) return 0;
-      return Math.round((w.vibe * (s.vibe_match || 0) + w.vers * (s.versatility || 0)) / den);
+    // Fixed ranking (no sliders): vibe-dominant, plus a little versatility.
+    function rankScore(p) {
+      const s = p.score; if (!s) return -1;
+      const v = s.vibe_match || 0;
+      const ver = (s.versatility == null ? v : s.versatility);
+      return 0.75 * v + 0.25 * ver;
     }
 
-    function rankAndRender() {
-      document.getElementById("w-vibe-v").textContent = wVibe.value;
-      document.getElementById("w-vers-v").textContent = wVers.value;
-      const w = { vibe: +wVibe.value, vers: +wVers.value };
-      const ranked = lastProducts
-        .map((p) => ({ ...p, _combined: combinedScore(p.score, w) }))
-        .sort((a, b) => b._combined - a._combined);
-      renderProducts(ranked);
-    }
-    [wVibe, wVers].forEach((el) => el.addEventListener("input", rankAndRender));
+    function cardEl(p) {
+      const li = document.createElement("li");
+      li.className = "card";
+      const a = document.createElement("a");
+      a.href = p.url || "#"; a.target = "_blank"; a.rel = "noopener";
 
-    function renderProducts(products) {
-      results.innerHTML = "";
-      for (const p of products) {
-        const li = document.createElement("li");
-        li.className = "card";
-
-        const link = document.createElement("a");
-        link.href = p.url || "#";
-        link.target = "_blank";
-        link.rel = "noopener";
-
-        const thumb = document.createElement("div");
-        thumb.className = "thumb";
-        if (p.image) {
-          const img = document.createElement("img");
-          img.loading = "lazy";
-          img.decoding = "async";
-          img.src = p.image;
-          img.alt = p.title || "";
-          img.addEventListener("error", () => { thumb.classList.add("placeholder"); img.remove(); });
-          thumb.appendChild(img);
-        } else {
-          thumb.classList.add("placeholder");
-        }
-        if (p._combined != null && p._combined >= 0) {
-          const badge = document.createElement("div");
-          badge.className = "score-badge";
-          badge.textContent = p._combined;
-          badge.title = "Combined score — re-weight with the sliders above";
-          thumb.appendChild(badge);
-        }
-        link.appendChild(thumb);
-
-        const body = document.createElement("div");
-        body.className = "card-body";
-
-        const title = document.createElement("div");
-        title.className = "card-title";
-        title.textContent = p.title || "(untitled)";
-        body.appendChild(title);
-
-        const priceText = [p.brand, p.price].filter(Boolean).join(" · ");
-        if (priceText) {
-          const price = document.createElement("div");
-          price.className = "card-price";
-          price.textContent = priceText;
-          body.appendChild(price);
-        }
-
-        if (p.domain) {
-          const domain = document.createElement("div");
-          domain.className = "card-domain";
-          domain.textContent = p.domain;
-          body.appendChild(domain);
-        }
-
-        if (p.score) {
-          const s = p.score;
-          const sub = document.createElement("div");
-          sub.className = "subscores";
-          sub.innerHTML =
-            "<span>vibe " + (s.vibe_match ?? "—") + "</span>" +
-            "<span>versatility " + (s.versatility ?? "—") + "</span>";
-          body.appendChild(sub);
-
-          const notes = s.notes || [];
-          if (notes.length) {
-            const ul = document.createElement("ul");
-            ul.className = "notes";
-            const icon = { heart: "❤️", heartbreak: "💔", question: "❓" };
-            for (const n of notes) {
-              const li2 = document.createElement("li");
-              li2.textContent = (icon[n.verdict] || "•") + " " + (n.text || "");
-              ul.appendChild(li2);
-            }
-            body.appendChild(ul);
-          }
-        }
-
-        const matches = (p.matched_queries || []).length;
-        if (matches > 1) {
-          const m = document.createElement("div");
-          m.className = "card-matches";
-          m.textContent = "matched " + matches + " queries";
-          body.appendChild(m);
-        }
-
-        link.appendChild(body);
-        li.appendChild(link);
-        results.appendChild(li);
+      const thumb = document.createElement("div");
+      thumb.className = "thumb";
+      if (p.image) {
+        const img = document.createElement("img");
+        img.loading = "lazy"; img.decoding = "async"; img.src = p.image; img.alt = p.title || "";
+        img.addEventListener("error", () => { thumb.classList.add("placeholder"); img.remove(); });
+        thumb.appendChild(img);
+      } else {
+        thumb.classList.add("placeholder");
       }
+      a.appendChild(thumb);
+
+      const meta = document.createElement("div");
+      meta.className = "meta";
+      const brand = p.brand || p.domain || "";
+      const match = p.score ? (p.score.vibe_match ?? "—") : "—";
+      meta.innerHTML =
+        (brand ? "<div class='m-brand'>" + esc(brand) + "</div>" : "") +
+        (p.price ? "<div class='m-price'>" + esc(p.price) + "</div>" : "") +
+        "<div class='m-match'>match " + match + "</div>";
+      a.appendChild(meta);
+
+      li.appendChild(a);
+      return li;
+    }
+
+    function groupEl(title, items) {
+      const sec = document.createElement("section");
+      const h = document.createElement("div");
+      h.className = "group-title";
+      h.textContent = title;
+      sec.appendChild(h);
+      const ul = document.createElement("ul");
+      ul.className = "grid";
+      items.forEach((p) => ul.appendChild(cardEl(p)));
+      sec.appendChild(ul);
+      return sec;
+    }
+
+    // From the top 6 by ranking: "closest match" = the 2 highest-vibe of them,
+    // "Jacque's picks" = the rest, in ranking order. Max 6 shown total.
+    function renderResults(products) {
+      resultsCol.innerHTML = "";
+      const scored = (products || []).filter((p) => p.score);
+      if (!scored.length) {
+        const empty = document.createElement("div");
+        empty.className = "group-title";
+        empty.textContent = "no matches";
+        resultsCol.appendChild(empty);
+        return;
+      }
+      const byRank = [...scored].sort((a, b) => rankScore(b) - rankScore(a)).slice(0, 6);
+      const byVibe = [...byRank].sort((a, b) => (b.score.vibe_match || 0) - (a.score.vibe_match || 0));
+      const closest = byVibe.slice(0, 2);
+      const closestUrls = new Set(closest.map((p) => p.url));
+      const picks = byRank.filter((p) => !closestUrls.has(p.url));
+      resultsCol.appendChild(groupEl("closest match", closest));
+      if (picks.length) resultsCol.appendChild(groupEl("Jacque's picks", picks));
     }
 
     // ---- GO: step 2 — search Google Shopping for the reviewed analysis -----
@@ -585,9 +562,18 @@
         return;
       }
       goStatus.textContent = "";
-      results.innerHTML = "";
-      statusEl.textContent = "";
+      resultsCol.classList.remove("show");
+      resultsCol.innerHTML = "";
       startSearching(currentAnalysis.queries);   // rotate phrases immediately
+
+      if (MOCK) {
+        await sleep(1300);
+        stopSearching();
+        lastProducts = MOCK_PRODUCTS;
+        renderResults(lastProducts);
+        resultsCol.classList.add("show");
+        return;
+      }
 
       const fd = new FormData();
       fd.append("analysis", JSON.stringify(currentAnalysis));
@@ -609,11 +595,8 @@
       stopSearching();   // animation disappears when done searching
       (data.costs || []).forEach(recordCost);
       lastProducts = data.products || [];
-      statusEl.textContent = lastProducts.length
-        ? lastProducts.length + " result(s), ranked by vibe — re-weight below:"
-        : "No products found.";
-      weightsPanel.style.display = lastProducts.length ? "flex" : "none";
-      rankAndRender();
+      renderResults(lastProducts);
+      resultsCol.classList.add("show");
     });
   </script>
 </body>

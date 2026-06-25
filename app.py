@@ -36,47 +36,48 @@ def _api_key():
 # attributes, a context-free versatility score, and the shopping queries that
 # fan out to Google Shopping. "Vibe" matters more than an exact match.
 ANALYSIS_PROMPT = (
-    "You are a fashion editor reading a garment from an image so a shopper can "
-    "find items with the same VIBE — not the exact product. Speak in terse "
-    "editorial shorthand: lowercase, fragments, no full sentences, no hedging "
-    "words ('likely', 'appears', 'probably'). Think fashion-caption caveman talk.\n\n"
-    "Return:\n"
-    "- category: the item in 1-3 words, e.g. 'crop top', 'ankle boot'.\n"
-    "- color: its dominant color in a word or two, e.g. 'black', 'washed indigo'.\n"
-    "- material: best visual read of the fabric, terse, e.g. 'stretch jersey'. "
-    "If genuinely unclear, a one-word guess with a '?' is fine.\n"
-    "- lines: 2-4 punchy fragments for cut, fit, and aesthetic, e.g. 'asymmetric', "
-    "'body-skimming', '90s minimalism'.\n"
-    "- occasions: 2-4 places/moments it wears best, e.g. 'evening', 'gallery', 'city'.\n"
-    "- queries: 3-5 shopping search strings at VARYING specificity (one tight, one "
-    "broad, one aesthetic-led). No price, brand, or size in any query.\n\n"
-    "Vibe over exact match."
+    "You are a fashion stylist reading a garment from an image so a shopper can "
+    "find items with the same VIBE — not the exact product. Produce three things:\n\n"
+    "1) item — a PRECISE, descriptive read used internally to match candidates. Be "
+    "specific and accurate; don't be terse here: category, silhouette/cut, color "
+    "family, pattern, best-guess material, formality, and 2-4 aesthetic/vibe tags. "
+    "If unsure about material, say so rather than inventing.\n"
+    "2) queries — 3-5 shopping search strings at VARYING specificity (one tight, one "
+    "broad, one aesthetic-led). No price, brand, or size.\n"
+    "3) display — the SAME read in terse editorial shorthand, only for showing the "
+    "user: lowercase fragments, no hedging words, fashion-caption caveman talk. "
+    "category (1-3 words), color (a word or two), material (terse; one-word guess "
+    "with '?' if unclear), lines (2-4 punchy cut/fit/aesthetic fragments), occasions "
+    "(2-4 places it wears best).\n\n"
+    "Vibe over exact match. The item read drives matching; display is only how it's shown."
 )
 
 ANALYSIS_SCHEMA = {
     "type": "object",
     "properties": {
+        # Precise, descriptive read — the reranker reference + query grounding.
         "item": {
             "type": "object",
             "properties": {
-                "category": {"type": "string", "description": "the item in 1-3 words, e.g. 'crop top'"},
-                "color": {"type": "string", "description": "dominant color, a word or two, e.g. 'black'"},
-                "material": {
+                "category": {"type": "string", "description": "e.g. 'blazer', 'ankle boot'"},
+                "silhouette": {"type": "string", "description": "cut/line, e.g. 'oversized boxy', 'body-skimming'"},
+                "color_family": {"type": "string", "description": "e.g. 'warm neutral / taupe', 'black'"},
+                "pattern": {"type": "string", "description": "'solid', 'stripe', etc."},
+                "material_guess": {
                     "type": "string",
-                    "description": "terse fabric read, e.g. 'stretch jersey'; one-word guess with '?' if unclear",
+                    "description": "best visual guess; say so if unsure rather than inventing",
                 },
-                "lines": {
+                "formality": {"type": "string", "enum": ["casual", "smart casual", "formal"]},
+                "aesthetic_tags": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "2-4 punchy cut/fit/aesthetic fragments, e.g. 'asymmetric', 'body-skimming', '90s minimalism'",
-                },
-                "occasions": {
-                    "type": "array",
-                    "items": {"type": "string"},
-                    "description": "2-4 places/moments it wears best, e.g. 'evening', 'gallery', 'city'",
+                    "description": "2-4 vibe tags, e.g. 'relaxed tailoring', '90s minimalism'",
                 },
             },
-            "required": ["category", "color", "material", "lines", "occasions"],
+            "required": [
+                "category", "silhouette", "color_family", "pattern",
+                "material_guess", "formality", "aesthetic_tags",
+            ],
             "additionalProperties": False,
         },
         "queries": {
@@ -85,8 +86,29 @@ ANALYSIS_SCHEMA = {
             "description": "3-5 shopping search strings at varying specificity "
                            "(one tight, one broad, one aesthetic-led); no price/brand/size",
         },
+        # Terse editorial shorthand — shown to the user only, never used for matching.
+        "display": {
+            "type": "object",
+            "properties": {
+                "category": {"type": "string", "description": "1-3 words, e.g. 'crop top'"},
+                "color": {"type": "string", "description": "a word or two, e.g. 'black'"},
+                "material": {"type": "string", "description": "terse, e.g. 'stretch jersey'; '?' if unclear"},
+                "lines": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "2-4 punchy fragments, e.g. 'asymmetric', 'body-skimming', '90s minimalism'",
+                },
+                "occasions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "2-4 places it wears best, e.g. 'evening', 'gallery', 'city'",
+                },
+            },
+            "required": ["category", "color", "material", "lines", "occasions"],
+            "additionalProperties": False,
+        },
     },
-    "required": ["item", "queries"],
+    "required": ["item", "queries", "display"],
     "additionalProperties": False,
 }
 
