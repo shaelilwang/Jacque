@@ -36,18 +36,21 @@ def _api_key():
 # attributes, a context-free versatility score, and the shopping queries that
 # fan out to Google Shopping. "Vibe" matters more than an exact match.
 ANALYSIS_PROMPT = (
-    "You are a fashion stylist analyzing a product image so a shopper can find "
-    "SIMILAR items to buy — not the identical product. Vibe matters more than an "
-    "exact match: the queries should find items with a similar FEEL.\n\n"
-    "Look at the main item in the image and return:\n"
-    "- its attributes: category, silhouette, color family, pattern, a best-guess "
-    "material, formality, and 2-4 free-text aesthetic/vibe tags;\n"
-    "- versatility_base: a 0-100 score for how neutral/classic the item is judged "
-    "from its attributes ALONE, with no wardrobe context, plus a one-line rationale;\n"
-    "- queries: 3-5 shopping search strings at VARYING specificity — include one "
-    "tight, one broad, and one aesthetic-led.\n\n"
-    "Do NOT put price, brand, or size in any query. If you are unsure about the "
-    "material, say so in material_guess rather than inventing it."
+    "You are a fashion editor reading a garment from an image so a shopper can "
+    "find items with the same VIBE — not the exact product. Speak in terse "
+    "editorial shorthand: lowercase, fragments, no full sentences, no hedging "
+    "words ('likely', 'appears', 'probably'). Think fashion-caption caveman talk.\n\n"
+    "Return:\n"
+    "- category: the item in 1-3 words, e.g. 'crop top', 'ankle boot'.\n"
+    "- color: its dominant color in a word or two, e.g. 'black', 'washed indigo'.\n"
+    "- material: best visual read of the fabric, terse, e.g. 'stretch jersey'. "
+    "If genuinely unclear, a one-word guess with a '?' is fine.\n"
+    "- lines: 2-4 punchy fragments for cut, fit, and aesthetic, e.g. 'asymmetric', "
+    "'body-skimming', '90s minimalism'.\n"
+    "- occasions: 2-4 places/moments it wears best, e.g. 'evening', 'gallery', 'city'.\n"
+    "- queries: 3-5 shopping search strings at VARYING specificity (one tight, one "
+    "broad, one aesthetic-led). No price, brand, or size in any query.\n\n"
+    "Vibe over exact match."
 )
 
 ANALYSIS_SCHEMA = {
@@ -56,37 +59,24 @@ ANALYSIS_SCHEMA = {
         "item": {
             "type": "object",
             "properties": {
-                "category": {"type": "string", "description": "e.g. 'blazer', 'ankle boot'"},
-                "silhouette": {"type": "string", "description": "e.g. 'oversized boxy', 'fitted'"},
-                "color_family": {"type": "string", "description": "e.g. 'warm neutral / taupe'"},
-                "pattern": {"type": "string", "description": "'solid', 'stripe', etc."},
-                "material_guess": {
+                "category": {"type": "string", "description": "the item in 1-3 words, e.g. 'crop top'"},
+                "color": {"type": "string", "description": "dominant color, a word or two, e.g. 'black'"},
+                "material": {
                     "type": "string",
-                    "description": "best visual guess; say so if unsure rather than inventing",
+                    "description": "terse fabric read, e.g. 'stretch jersey'; one-word guess with '?' if unclear",
                 },
-                "formality": {"type": "string", "enum": ["casual", "smart casual", "formal"]},
-                "aesthetic_tags": {
+                "lines": {
                     "type": "array",
                     "items": {"type": "string"},
-                    "description": "2-4 free-text vibe tags, e.g. 'relaxed tailoring', 'earthy minimalist'",
+                    "description": "2-4 punchy cut/fit/aesthetic fragments, e.g. 'asymmetric', 'body-skimming', '90s minimalism'",
+                },
+                "occasions": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "2-4 places/moments it wears best, e.g. 'evening', 'gallery', 'city'",
                 },
             },
-            "required": [
-                "category", "silhouette", "color_family", "pattern",
-                "material_guess", "formality", "aesthetic_tags",
-            ],
-            "additionalProperties": False,
-        },
-        "versatility_base": {
-            "type": "object",
-            "properties": {
-                "score": {
-                    "type": "integer",
-                    "description": "0-100, how neutral/classic from attributes alone, no wardrobe context",
-                },
-                "rationale": {"type": "string", "description": "one line"},
-            },
-            "required": ["score", "rationale"],
+            "required": ["category", "color", "material", "lines", "occasions"],
             "additionalProperties": False,
         },
         "queries": {
@@ -96,7 +86,7 @@ ANALYSIS_SCHEMA = {
                            "(one tight, one broad, one aesthetic-led); no price/brand/size",
         },
     },
-    "required": ["item", "versatility_base", "queries"],
+    "required": ["item", "queries"],
     "additionalProperties": False,
 }
 
@@ -273,6 +263,59 @@ def discover():
         "products": norm,
         "costs": [analyze_cost, search_cost, rerank_cost],
     })
+
+
+@app.route("/api/search_for", methods=["POST"])
+def search_for():
+    """Step 2 of the image flow: given an analysis already produced by
+    /api/assist, search Google Shopping for its queries and rerank — no
+    re-analysis (so the summary the user reviewed matches what's searched)."""
+    if not os.environ.get("SERPAPI_API_KEY"):
+        return jsonify({"error": "SERPAPI_API_KEY is not set on the server."}), 500
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return jsonify({"error": "ANTHROPIC_API_KEY is not set on the server."}), 500
+
+    try:
+        analysis = json.loads(request.form.get("analysis") or "{}")
+    except (ValueError, TypeError):
+        return jsonify({"error": "Invalid analysis payload."}), 400
+    if not isinstance(analysis, dict) or not analysis.get("queries"):
+        return jsonify({"error": "Analysis has no queries to search."}), 400
+
+    min_price = _form_price(request.form, "min_price")
+    max_price = _form_price(request.form, "max_price")
+    try:
+        from harness import search_queries
+
+        products, search_cost = search_queries(
+            analysis["queries"], min_price=min_price, max_price=max_price
+        )
+    except Exception as e:
+        return jsonify({"error": f"Google Shopping search failed: {e}"}), 502
+    search_cost["backend"] = "google shopping (serpapi)"
+
+    try:
+        from rerank import rerank
+
+        scores, rerank_cost = rerank(analysis, products)
+    except Exception as e:
+        return jsonify({"error": f"Rerank failed: {e}"}), 502
+    by_index = {s["index"]: s for s in scores}
+
+    norm = [
+        {
+            "title": p.get("title", ""),
+            "brand": "",
+            "price": p.get("price", ""),
+            "domain": p.get("site", ""),
+            "image": p.get("image", ""),
+            "url": p.get("url", ""),
+            "matched_queries": p.get("matched_queries", []),
+            "score": by_index.get(i),
+        }
+        for i, p in enumerate(products)
+    ]
+    return jsonify({"products": norm, "costs": [search_cost, rerank_cost]})
 
 
 def _form_price(form, key):
