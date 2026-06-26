@@ -186,6 +186,7 @@
       font-size: 12px; line-height: 1.5; color: var(--ink); margin-top: 10px;
     }
     .meta .m-match { color: var(--muted); }
+    .show-more { align-self: flex-start; }   /* left-aligned, like search → */
   </style>
 </head>
 <body>
@@ -266,6 +267,14 @@
       ["90s mesh top", "Urban Outfitters", "$34", "jacque6", 74, 58],
       ["Cap-sleeve crop", "Zara", "$25", "jacque7", 70, 66],
       ["Halter knit top", "Nordstrom", "$72", "jacque8", 66, 64],
+      ["Twist-front tee", "Aritzia", "$48", "jacque9", 64, 60],
+      ["Bias-cut cami", "Reformation", "$88", "jacque10", 62, 57],
+      ["Ribbed scoop top", "Uniqlo", "$20", "jacque11", 60, 70],
+      ["Cowl-neck shell", "COS", "$69", "jacque12", 58, 62],
+      ["Asym mesh layer", "Zara", "$36", "jacque13", 56, 54],
+      ["Corset-seam top", "& Other Stories", "$75", "jacque14", 53, 50],
+      ["Strappy knit top", "Mango", "$32", "jacque15", 50, 59],
+      ["Sheer panel tee", "Urban Outfitters", "$28", "jacque16", 47, 52],
     ].map(([title, brand, price, seed, vibe, vers]) => ({
       title, brand, price, domain: brand, url: "#",
       image: "https://picsum.photos/seed/" + seed + "/400/520",
@@ -546,13 +555,32 @@
         resultsCol.appendChild(empty);
         return;
       }
-      const byRank = [...scored].sort((a, b) => rankScore(b) - rankScore(a)).slice(0, 6);
-      const byVibe = [...byRank].sort((a, b) => (b.score.vibe_match || 0) - (a.score.vibe_match || 0));
+      const byRankAll = [...scored].sort((a, b) => rankScore(b) - rankScore(a));
+      const top6 = byRankAll.slice(0, 6);
+      const rest = byRankAll.slice(6);   // everything else, revealed by "show more"
+      const byVibe = [...top6].sort((a, b) => (b.score.vibe_match || 0) - (a.score.vibe_match || 0));
       const closest = byVibe.slice(0, 2);
       const closestUrls = new Set(closest.map((p) => p.url));
-      const picks = byRank.filter((p) => !closestUrls.has(p.url));
+      const picks = top6.filter((p) => !closestUrls.has(p.url));
       resultsCol.appendChild(groupEl("closest match", closest));
       if (picks.length) resultsCol.appendChild(groupEl("Jacque's picks", picks));
+
+      // "show more" (styled like search →) unfolds all remaining results below.
+      if (rest.length) {
+        const moreUl = document.createElement("ul");
+        moreUl.className = "grid";
+        moreUl.hidden = true;
+        rest.forEach((p) => moreUl.appendChild(cardEl(p)));
+
+        const btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "go show-more";
+        btn.textContent = "show more";
+        btn.addEventListener("click", () => { moreUl.hidden = false; btn.remove(); });
+
+        resultsCol.appendChild(btn);
+        resultsCol.appendChild(moreUl);
+      }
     }
 
     // ---- GO: step 2 — search Google Shopping for the reviewed analysis -----
